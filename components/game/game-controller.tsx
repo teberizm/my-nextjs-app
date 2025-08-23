@@ -71,7 +71,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
 
   const handleNightAction = (
     targetId: string | null,
-    actionType: "KILL" | "PROTECT" | "INVESTIGATE",
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
   ) => {
     submitNightAction(currentPlayer.id, targetId, actionType)
   }

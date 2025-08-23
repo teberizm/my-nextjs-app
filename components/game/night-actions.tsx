@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Moon, Target, Shield, Skull, Eye, Search } from "lucide-react"
+import { Moon, Target, Shield, Skull, Eye, Search, Bomb } from "lucide-react"
 import { getRoleInfo, isTraitorRole, getBaseRole } from "@/lib/game-logic"
 import type { Player } from "@/lib/types"
 
@@ -14,7 +14,7 @@ interface NightActionsProps {
   allPlayers: Player[]
   onSubmitAction: (
     targetId: string | null,
-    actionType: "KILL" | "PROTECT" | "INVESTIGATE",
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
   ) => void
   timeRemaining: number
 }
@@ -40,6 +40,11 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
   const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
 
   const handleSubmitAction = () => {
+    if (visibleRole === "BOMBER") {
+      onSubmitAction(selectedTarget, "BOMB_PLANT")
+      setActionSubmitted(true)
+      return
+    }
     let actionType: "KILL" | "PROTECT" | "INVESTIGATE" = "KILL"
     if (mode === "ROLE") {
       const roleToUse = isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole
@@ -73,6 +78,8 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
         return "Soruşturmak istediğin kişiyi seç"
       case "SURVIVOR":
         return survivorShields > 0 ? "Bu gece kendini koru" : "Koruma hakkın bitti"
+      case "BOMBER":
+        return "Bomba yerleştirmek istediğin kişiyi seç"
       default:
         return "Bu gece bir aksiyon yapman gerekmiyor"
     }
@@ -92,6 +99,8 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
         return <Search className="w-5 h-5 text-indigo-400" />
       case "SURVIVOR":
         return <Shield className="w-5 h-5 text-green-400" />
+      case "BOMBER":
+        return <Bomb className="w-5 h-5 text-orange-400" />
       default:
         return <Moon className="w-5 h-5 text-primary" />
     }
@@ -280,8 +289,23 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
             className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
           >
             {getActionIcon()}
-            <span className="ml-2">Aksiyonu Gönder</span>
+            <span className="ml-2">
+              {visibleRole === "BOMBER" ? "Bombayı Yerleştir" : "Aksiyonu Gönder"}
+            </span>
           </Button>
+
+          {visibleRole === "BOMBER" && (
+            <Button
+              onClick={() => {
+                onSubmitAction(null, "BOMB_DETONATE")
+                setActionSubmitted(true)
+              }}
+              variant="destructive"
+              className="w-full"
+            >
+              Bombaları Patlat
+            </Button>
+          )}
 
           {isTraitorRole(currentPlayer.role!) && mode === "KILL" && (
             <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">

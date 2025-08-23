@@ -22,7 +22,7 @@ interface GameStateHook {
   submitNightAction: (
     playerId: string,
     targetId: string | null,
-    actionType: "KILL" | "PROTECT" | "INVESTIGATE",
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
   ) => void
   submitVote: (voterId: string, targetId: string) => void
   resetGame: () => void
@@ -39,6 +39,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [selectedCardDrawers, setSelectedCardDrawers] = useState<string[]>([])
   const [currentCardDrawer, setCurrentCardDrawer] = useState<string | null>(null)
   const [deathsThisTurn, setDeathsThisTurn] = useState<Player[]>([])
+  const [bombTargets, setBombTargets] = useState<string[]>([])
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
   const isGameOwner = currentPlayer?.isOwner || false
@@ -80,16 +81,26 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setSelectedCardDrawers([])
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
+    setBombTargets([])
   }, [])
 
   const processNightActions = useCallback(() => {
     const killers = nightActions.filter((action) => action.actionType === "KILL")
+    const bombPlacers = nightActions.filter((a) => a.actionType === "BOMB_PLANT")
+    const detonateAction = nightActions.find((a) => a.actionType === "BOMB_DETONATE")
+
+    let newBombTargets = [...bombTargets]
+    bombPlacers.forEach((a) => {
+      if (a.targetId) newBombTargets.push(a.targetId)
+    })
 
     const protectedPlayers = new Set<string>()
     const survivorActors = new Set<string>()
     const revivedPlayers = new Set<string>()
 
-    const updatedActions: NightAction[] = nightActions.map((action) => {
+    let detonateIndex = -1
+
+    const updatedActions: NightAction[] = nightActions.map((action, idx) => {
       const actor = players.find((p) => p.id === action.playerId)
       const target = action.targetId ? players.find((p) => p.id === action.targetId) : null
       let result: any = null
@@ -149,10 +160,28 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         }
       }
 
+      if (action.actionType === "BOMB_PLANT") {
+        result = { type: "BOMB_PLANT" }
+      } else if (action.actionType === "BOMB_DETONATE") {
+        detonateIndex = idx
+      }
+
       return { ...action, result }
     })
 
-    const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean)
+    let bombVictims: Player[] = []
+    if (detonateIndex !== -1) {
+      bombVictims = players.filter((p) => newBombTargets.includes(p.id))
+      const victimNames = bombVictims.map((p) => p.name)
+      updatedActions[detonateIndex] = {
+        ...updatedActions[detonateIndex],
+        result: { type: "BOMB_DETONATE", victims: victimNames },
+      }
+      newBombTargets = []
+    }
+
+    const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean) as string[]
+    const bombVictimIds = bombVictims.map((p) => p.id)
 
     const newDeaths: Player[] = []
 
@@ -172,7 +201,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           updatedPlayer.isAlive = true
         }
 
-        if (targetedPlayers.includes(player.id) && !protectedPlayers.has(player.id)) {
+        if (bombVictimIds.includes(player.id)) {
+          updatedPlayer.isAlive = false
+          newDeaths.push(updatedPlayer)
+        } else if (targetedPlayers.includes(player.id) && !protectedPlayers.has(player.id)) {
           updatedPlayer.isAlive = false
           newDeaths.push(updatedPlayer)
         }
@@ -181,10 +213,13 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       }),
     )
 
+    newBombTargets = newBombTargets.filter((id) => !newDeaths.some((p) => p.id === id))
+    setBombTargets(newBombTargets)
+
     setNightActions(updatedActions)
 
     setDeathsThisTurn(newDeaths)
-  }, [nightActions, players])
+  }, [nightActions, players, bombTargets])
 
   const processVotes = useCallback(() => {
     const voteCount: Record<string, number> = {}
@@ -312,7 +347,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   }, [currentPhase, game, players, processNightActions, processVotes, selectedCardDrawers, currentCardDrawer])
 
   const submitNightAction = useCallback(
-    (playerId: string, targetId: string | null, actionType: "KILL" | "PROTECT" | "INVESTIGATE") => {
+    (
+      playerId: string,
+      targetId: string | null,
+      actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
+    ) => {
       const newAction: NightAction = {
         playerId,
         targetId,
@@ -352,6 +391,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setSelectedCardDrawers([])
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
+    setBombTargets([])
   }, [])
 
   useEffect(() => {

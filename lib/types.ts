@@ -94,7 +94,7 @@ export interface GameState {
 export interface NightAction {
   playerId: string
   targetId: string | null
-  actionType: "KILL" | "PROTECT" | "INVESTIGATE"
+  actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE"
   timestamp: Date
   result?: any
 }

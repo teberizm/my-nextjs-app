@@ -153,7 +153,7 @@ export function getRoleInfo(role: PlayerRole) {
       bgColor: "bg-orange-400/20",
       icon: "💣",
       team: "BOMBER",
-      nightAction: false,
+      nightAction: true,
     },
     SURVIVOR: {
       name: "Survivor",
@@ -172,16 +172,22 @@ export function getRoleInfo(role: PlayerRole) {
 export function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
   const alivePlayers = players.filter((p) => p.isAlive)
   const aliveTraitors = alivePlayers.filter((p) => isTraitorRole(p.role!))
-  const aliveNonTraitors = alivePlayers.filter((p) => !isTraitorRole(p.role!))
   const aliveBomber = alivePlayers.find((p) => p.role === "BOMBER")
+  const aliveNonTraitors = alivePlayers.filter(
+    (p) => !isTraitorRole(p.role!) && p.role !== "BOMBER",
+  )
 
   // Bomber wins if last one standing
   if (aliveBomber && alivePlayers.length === 1) {
     return { winner: "BOMBER", gameEnded: true }
   }
 
-  // Traitors win if they equal or outnumber all non-traitors
-  if (aliveTraitors.length >= aliveNonTraitors.length && aliveTraitors.length > 0) {
+  // Traitors win if no bomber alive and they equal or outnumber all non-traitors
+  if (
+    !aliveBomber &&
+    aliveTraitors.length >= aliveNonTraitors.length &&
+    aliveTraitors.length > 0
+  ) {
     return { winner: "TRAITORS", gameEnded: true }
   }
 

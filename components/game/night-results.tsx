@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Shield, Skull, Heart, Eye } from "lucide-react"
+import { Shield, Skull, Heart, Eye, Bomb } from "lucide-react"
 import type { Player, NightAction } from "@/lib/types"
 import { getRoleInfo } from "@/lib/game-logic"
 
@@ -23,7 +23,9 @@ export function NightResults({
 }: NightResultsProps) {
   // Find the current player's night action
   const myAction = nightActions.find((action) => action.playerId === currentPlayer.id)
-  const targetPlayer = myAction?.targetId ? allPlayers.find((p) => p.id === myAction.targetId) : null
+  const targetPlayer = myAction?.targetId
+    ? allPlayers.find((p) => p.id === myAction.targetId)
+    : null
   const visibleRole = currentPlayer.displayRole || currentPlayer.role
   const roleName = visibleRole ? getRoleInfo(visibleRole).name : ""
 
@@ -35,13 +37,16 @@ export function NightResults({
         return <Shield className="w-6 h-6 text-blue-400" />
       case "INVESTIGATE":
         return <Eye className="w-6 h-6 text-purple-400" />
+      case "BOMB_PLANT":
+      case "BOMB_DETONATE":
+        return <Bomb className="w-6 h-6 text-orange-400" />
       default:
         return <Heart className="w-6 h-6 text-gray-400" />
     }
   }
 
   const getActionMessage = () => {
-    if (!myAction || !targetPlayer) {
+    if (!myAction) {
       return {
         title: "Gece Boyunca",
         message: "Bu gece herhangi bir aksiyon yapmadın.",
@@ -51,15 +56,27 @@ export function NightResults({
 
     switch (myAction.actionType) {
       case "KILL":
+        if (!targetPlayer)
+          return {
+            title: "Aksiyon Tamamlanamadı",
+            message: "Hedef bulunamadı.",
+            icon: <Heart className="w-8 h-8 text-gray-400" />,
+          }
         return {
           title: "Saldırı Gerçekleştirildi",
           message: `${targetPlayer.name} adlı oyuncuya saldırdın. ${targetPlayer.isAlive ? "Ancak korunmuş olabilir..." : "Başarılı!"}`,
           icon: <Skull className="w-8 h-8 text-red-400" />,
         }
       case "PROTECT":
+        if (!targetPlayer)
+          return {
+            title: "Aksiyon Tamamlanamadı",
+            message: "Hedef bulunamadı.",
+            icon: <Heart className="w-8 h-8 text-gray-400" />,
+          }
         if (currentPlayer.role === "DOCTOR") {
           return {
-            title: "İyileştirme", 
+            title: "İyileştirme",
             message: myAction.result?.success
               ? `${targetPlayer.name} adlı oyuncuyu dirilttin!`
               : `${targetPlayer.name} adlı oyuncuyu iyileştirdin fakat bir şey olmadı.`,
@@ -72,6 +89,12 @@ export function NightResults({
           icon: <Shield className="w-8 h-8 text-blue-400" />,
         }
       case "INVESTIGATE":
+        if (!targetPlayer)
+          return {
+            title: "Aksiyon Tamamlanamadı",
+            message: "Hedef bulunamadı.",
+            icon: <Heart className="w-8 h-8 text-gray-400" />,
+          }
         if (myAction.result?.type === "WATCH") {
           return {
             title: "Gözetleme Sonucu",
@@ -83,9 +106,10 @@ export function NightResults({
         }
         if (myAction.result?.type === "DETECT") {
           const roles = myAction.result.roles as string[]
+          const roleNames = roles.map((r) => getRoleInfo(r as any).name)
           return {
             title: "Soruşturma Sonucu",
-            message: `${targetPlayer.name} için olası roller: ${roles[0]} veya ${roles[1]}`,
+            message: `${targetPlayer.name} için olası roller: ${roleNames[0]} veya ${roleNames[1]}`,
             icon: <Eye className="w-8 h-8 text-purple-400" />,
           }
         }
@@ -94,10 +118,31 @@ export function NightResults({
           message: `${targetPlayer.name} hakkında bilgi edinilemedi.`,
           icon: <Eye className="w-8 h-8 text-purple-400" />,
         }
+      case "BOMB_PLANT":
+        if (!targetPlayer)
+          return {
+            title: "Aksiyon Tamamlanamadı",
+            message: "Hedef bulunamadı.",
+            icon: <Heart className="w-8 h-8 text-gray-400" />,
+          }
+        return {
+          title: "Bomba Yerleştirildi",
+          message: `${targetPlayer.name} adlı oyuncuya bomba yerleştirdin.`,
+          icon: <Bomb className="w-8 h-8 text-orange-400" />,
+        }
+      case "BOMB_DETONATE":
+        const victims = (myAction.result?.victims as string[]) || []
+        return {
+          title: "Bombalar Patladı",
+          message: victims.length ? `${victims.join(", ")} öldü.` : "Bombaları patlattın fakat kimse ölmedi.",
+          icon: <Bomb className="w-8 h-8 text-orange-400" />,
+        }
       default:
         return {
           title: "Aksiyon Tamamlandı",
-          message: `${targetPlayer.name} üzerinde aksiyon gerçekleştirdin.`,
+          message: targetPlayer
+            ? `${targetPlayer.name} üzerinde aksiyon gerçekleştirdin.`
+            : "Bir aksiyon gerçekleştirdin.",
           icon: <Heart className="w-8 h-8 text-gray-400" />,
         }
     }
