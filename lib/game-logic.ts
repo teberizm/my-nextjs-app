@@ -21,24 +21,26 @@ export function isInnocentRole(role: PlayerRole) {
   return ["DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"].includes(role)
 }
 
+export function isSpecialRole(role: PlayerRole) {
+  return ["BOMBER", "SURVIVOR"].includes(role)
+}
+
 export function assignRoles(players: Player[], settings: GameSettings): Player[] {
   const shuffledPlayers = [...players].sort(() => Math.random() - 0.5)
   const roles: PlayerRole[] = []
 
-  const baseRoles: PlayerRole[] = [
-    "DOCTOR",
-    "DELI",
-    "GUARDIAN",
-    "WATCHER",
-    "DETECTIVE",
-    "BOMBER",
-    "SURVIVOR",
-  ]
+  const innocentRoles: PlayerRole[] = ["DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"]
+  const specialRoles: PlayerRole[] = ["BOMBER", "SURVIVOR"]
 
-  // Randomly assign roles from base pool
+  const specialCount = Math.min(settings.specialRoleCount, players.length)
+  for (let i = 0; i < specialCount; i++) {
+    const role = specialRoles[Math.floor(Math.random() * specialRoles.length)]
+    roles.push(role)
+  }
+
   while (roles.length < players.length) {
-    const randomRole = baseRoles[Math.floor(Math.random() * baseRoles.length)]
-    roles.push(randomRole)
+    const role = innocentRoles[Math.floor(Math.random() * innocentRoles.length)]
+    roles.push(role)
   }
 
   // Convert some roles to traitor variants
@@ -59,9 +61,14 @@ export function assignRoles(players: Player[], settings: GameSettings): Player[]
     if (role === "DELI") {
       const innocentRoles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE"]
       const fakeRole = innocentRoles[Math.floor(Math.random() * innocentRoles.length)]
-      return { ...player, role, displayRole: fakeRole }
+      return { ...player, role, displayRole: fakeRole, survivorShields: 0 }
     }
-    return { ...player, role, displayRole: role }
+    return {
+      ...player,
+      role,
+      displayRole: role,
+      survivorShields: role === "SURVIVOR" ? 2 : 0,
+    }
   })
 }
 

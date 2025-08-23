@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Shield, Skull, Heart, Eye } from "lucide-react"
 import type { Player, NightAction } from "@/lib/types"
-import { getBaseRole, isTraitorRole } from "@/lib/game-logic"
+import { getBaseRole, getRoleInfo, isTraitorRole } from "@/lib/game-logic"
 
 interface NightResultsProps {
   currentPlayer: Player
@@ -25,6 +25,7 @@ export function NightResults({
   const myAction = nightActions.find((action) => action.playerId === currentPlayer.id)
   const targetPlayer = myAction?.targetId ? allPlayers.find((p) => p.id === myAction.targetId) : null
   const visibleRole = currentPlayer.displayRole || currentPlayer.role
+  const roleName = visibleRole ? getRoleInfo(visibleRole).name : ""
 
   const getActionIcon = (actionType: string) => {
     switch (actionType) {
@@ -91,7 +92,12 @@ export function NightResults({
 
         if (isWatcher) {
           const visitors = nightActions
-            .filter((a) => a.targetId === targetPlayer.id && a.playerId !== currentPlayer.id)
+            .filter(
+              (a) =>
+                a.targetId === targetPlayer.id &&
+                a.playerId !== currentPlayer.id &&
+                a.playerId !== targetPlayer.id,
+            )
             .map((a) => allPlayers.find((p) => p.id === a.playerId)?.name || "")
           return {
             title: "Gözetleme Sonucu",
@@ -136,7 +142,7 @@ export function NightResults({
           <h3 className="font-semibold text-sm text-primary mb-2">Kişisel Özet</h3>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Rolün:</span>
-            <span className="font-medium text-foreground">{visibleRole}</span>
+            <span className="font-medium text-foreground">{roleName}</span>
           </div>
           <div className="flex items-center justify-between text-sm mt-1">
             <span className="text-muted-foreground">Durum:</span>

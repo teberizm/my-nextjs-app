@@ -9,6 +9,7 @@ import { VotingPhase } from "./voting-phase"
 import { GameEnd } from "./game-end"
 import { NightResults } from "./night-results"
 import { DeathAnnouncement } from "./death-announcement"
+import { VoteResults } from "./vote-results"
 import { CardDrawingPhase } from "./card-drawing-phase"
 import type { Player, GameSettings } from "@/lib/types"
 
@@ -147,16 +148,12 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
 
     case "RESOLVE":
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4 pulse-glow">
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-            <h2 className="text-2xl font-bold font-work-sans mb-2">Sonuçlar Hesaplanıyor</h2>
-            <p className="text-muted-foreground">Oylar sayılıyor ve sonuçlar belirleniyor...</p>
-            <div className="text-lg font-bold text-primary mt-4">{timeRemaining}s</div>
-          </div>
-        </div>
+        <VoteResults
+          players={players}
+          votes={votes}
+          deaths={deathsThisTurn}
+          timeRemaining={timeRemaining}
+        />
       )
 
     case "END":

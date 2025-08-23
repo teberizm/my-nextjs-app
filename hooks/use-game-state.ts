@@ -90,17 +90,35 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         players.find((p) => p.id === action.playerId)?.role !== "DELI",
     )
 
-    const protectedPlayers = new Set(protectors.map((action) => action.targetId).filter(Boolean))
+    const protectedPlayers = new Set<string>()
+    const survivorActors = new Set<string>()
+    protectors.forEach((action) => {
+      const actor = players.find((p) => p.id === action.playerId)
+      if (!actor) return
+      if (actor.role === "SURVIVOR") {
+        if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
+          protectedPlayers.add(actor.id)
+          survivorActors.add(actor.id)
+        }
+      } else if (action.targetId) {
+        protectedPlayers.add(action.targetId)
+      }
+    })
+
     const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean)
 
     const newDeaths: Player[] = []
 
     setPlayers((prevPlayers) =>
       prevPlayers.map((player) => {
-        const updatedPlayer = { ...player, hasShield: false }
+        const updatedPlayer: Player = { ...player, hasShield: false }
 
         if (protectedPlayers.has(player.id)) {
           updatedPlayer.hasShield = true
+        }
+
+        if (survivorActors.has(player.id)) {
+          updatedPlayer.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
         }
 
         if (targetedPlayers.includes(player.id) && !protectedPlayers.has(player.id)) {
@@ -113,8 +131,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     )
 
     setDeathsThisTurn(newDeaths)
-
-    setNightActions([])
   }, [nightActions, players])
 
   const processVotes = useCallback(() => {
@@ -156,7 +172,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }
 
     setDeathsThisTurn((prev) => [...prev, ...newDeaths])
-    setVotes({})
   }, [votes, players])
 
   const advancePhase = useCallback(() => {
@@ -184,6 +199,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       case "NIGHT_RESULTS":
         setCurrentPhase("DEATH_ANNOUNCEMENT")
         setTimeRemaining(5)
+        setNightActions([])
         break
 
       case "DEATH_ANNOUNCEMENT":
@@ -233,6 +249,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           setCurrentPhase("NIGHT")
           setTimeRemaining(15)
           setDeathsThisTurn([])
+          setVotes({})
         }
         break
 

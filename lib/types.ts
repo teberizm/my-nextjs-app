@@ -32,6 +32,7 @@ export interface Player {
   isAlive: boolean
   isMuted: boolean
   hasShield: boolean
+  survivorShields?: number
   connectedAt: Date
 }
 

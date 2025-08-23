@@ -29,6 +29,8 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
   const visibleRole = currentPlayer.displayRole || currentPlayer.role!
   const baseRole = getBaseRole(currentPlayer.role!)
   const roleInfo = getRoleInfo(mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole)
+  const survivorShields = currentPlayer.survivorShields || 0
+  const isSurvivorWithoutShields = visibleRole === "SURVIVOR" && survivorShields <= 0
   const alivePlayers = allPlayers.filter((p) => {
     if (!p.isAlive || p.id === currentPlayer.id) return false
     // Traitors cannot target other traitors
@@ -70,7 +72,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
       case "DETECTIVE":
         return "Soruşturmak istediğin kişiyi seç"
       case "SURVIVOR":
-        return "Bu gece kendini koru"
+        return survivorShields > 0 ? "Bu gece kendini koru" : "Koruma hakkın bitti"
       default:
         return "Bu gece bir aksiyon yapman gerekmiyor"
     }
@@ -95,7 +97,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
     }
   }
 
-  if (!roleInfo.nightAction) {
+  if (!roleInfo.nightAction || isSurvivorWithoutShields) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="max-w-md w-full neon-border bg-card/50 backdrop-blur-sm">
@@ -209,10 +211,13 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {["DOCTOR", "SURVIVOR"].includes(
-                mode === "ROLE" && isTraitorRole(currentPlayer.role!)
-                  ? baseRole
-                  : visibleRole,
+              {(
+                ["DOCTOR"].includes(
+                  mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole,
+                ) ||
+                ((mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) ===
+                  "SURVIVOR" &&
+                  survivorShields > 0)
               ) && (
                 <div
                   className={`p-3 rounded-lg border cursor-pointer transition-all ${
@@ -236,9 +241,10 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
                 </div>
               )}
 
-              {!(mode === "ROLE" && ["SURVIVOR"].includes(
-                isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole,
-              )) &&
+              {!(
+                mode === "ROLE" &&
+                (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) === "SURVIVOR"
+              ) &&
                 alivePlayers.map((player) => (
                   <div
                     key={player.id}
