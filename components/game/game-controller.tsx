@@ -37,6 +37,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    deathLog,
     bombTargets,
     playerNotes,
   } = useGameState(currentPlayerId)
@@ -123,7 +124,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           timeRemaining={timeRemaining}
           currentTurn={currentTurn}
           playerNotes={playerNotes}
-          deaths={deathsThisTurn}
+          deaths={deathLog}
         />
       )
 
@@ -136,6 +137,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           onSubmitVote={handleVote}
           timeRemaining={timeRemaining}
           hasVoted={hasVoted}
+          playerNotes={playerNotes}
         />
       )
 

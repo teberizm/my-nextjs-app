@@ -4,7 +4,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { Crown, Shield, VolumeX, Skull } from "lucide-react"
-import { getRoleInfo } from "@/lib/game-logic"
+import { getRoleInfo, isTraitorRole } from "@/lib/game-logic"
 import type { Player } from "@/lib/types"
 
 interface PlayerStatusProps {
@@ -69,7 +69,13 @@ export function PlayerStatus({ players, currentPlayer, showRoles = false }: Play
                       )}
                       {player.isMuted && <VolumeX className="w-3 h-3 text-orange-400" />}
                       {!player.isAlive && <Skull className="w-3 h-3 text-gray-400" />}
-                    </div>
+                      {isTraitorRole(currentPlayer.role!) &&
+                        isTraitorRole(player.role!) &&
+                        player.isAlive &&
+                        player.id !== currentPlayer.id && (
+                          <Skull className="w-3 h-3 text-destructive" />
+                        )}
+                      </div>
                   </div>
                 </div>
 

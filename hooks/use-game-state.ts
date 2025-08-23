@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { assignRoles, getWinCondition } from "@/lib/game-logic"
+import { assignRoles, getWinCondition, getRoleInfo } from "@/lib/game-logic"
 import { BotBehavior } from "@/lib/bot-players"
 import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 
@@ -17,6 +17,7 @@ interface GameStateHook {
   selectedCardDrawers: string[]
   currentCardDrawer: string | null
   deathsThisTurn: Player[]
+  deathLog: Player[]
   bombTargets: string[]
   playerNotes: Record<string, string[]>
   startGame: (players: Player[], settings: GameSettings) => void
@@ -41,6 +42,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [selectedCardDrawers, setSelectedCardDrawers] = useState<string[]>([])
   const [currentCardDrawer, setCurrentCardDrawer] = useState<string | null>(null)
   const [deathsThisTurn, setDeathsThisTurn] = useState<Player[]>([])
+  const [deathLog, setDeathLog] = useState<Player[]>([])
   const [bombTargets, setBombTargets] = useState<string[]>([])
   const [playerNotes, setPlayerNotes] = useState<Record<string, string[]>>({})
 
@@ -91,6 +93,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setSelectedCardDrawers([])
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
+    setDeathLog([])
     setBombTargets([])
     setPlayerNotes({})
   }, [])
@@ -242,7 +245,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
             break
           case "DETECT":
             if (target) {
-              note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${result.roles[0]}, ${result.roles[1]}`
+              const r1 = getRoleInfo(result.roles[0]).name
+              const r2 = getRoleInfo(result.roles[1]).name
+              note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${r1}, ${r2}`
             }
             break
           case "BOMB_PLANT":
@@ -310,6 +315,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setNightActions(updatedActions)
 
     setDeathsThisTurn(newDeaths)
+    if (newDeaths.length > 0) {
+      setDeathLog((prev) => [...prev, ...newDeaths])
+    }
   }, [nightActions, players, bombTargets, currentTurn, addPlayerNote])
 
   const processVotes = useCallback(() => {
@@ -356,7 +364,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       // Bomber no longer causes extra deaths upon elimination
     }
 
-    setDeathsThisTurn((prev) => [...prev, ...newDeaths])
+    setDeathsThisTurn(newDeaths)
+    if (newDeaths.length > 0) {
+      setDeathLog((prev) => [...prev, ...newDeaths])
+    }
   }, [votes, players])
 
   const advancePhase = useCallback(() => {
@@ -492,6 +503,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setSelectedCardDrawers([])
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
+    setDeathLog([])
     setBombTargets([])
   }, [])
 
@@ -577,6 +589,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    deathLog,
     bombTargets,
     playerNotes,
     startGame,

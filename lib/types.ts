@@ -52,7 +52,6 @@ export interface GameSettings {
   nightDuration: number
   dayDuration: number
   voteDuration: number
-  cardProfile: "STANDARD" | "CHAOS" | "QUICK"
 }
 
 export interface Game {

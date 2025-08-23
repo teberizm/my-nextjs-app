@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import { Users, Crown, Copy, QrCode, Settings, Play, UserX, Lock, Unlock, Share2 } from "lucide-react"
 import type { Room, Player, GameSettings } from "@/lib/types"
@@ -233,10 +232,6 @@ export function RoomLobby({
                 <span className="text-muted-foreground">Oylama:</span>
                 <span className="ml-2 font-semibold">{gameSettings.voteDuration}s</span>
               </div>
-              <div>
-                <span className="text-muted-foreground">Kart Profili:</span>
-                <span className="ml-2 font-semibold">{gameSettings.cardProfile}</span>
-              </div>
             </div>
           </CardContent>
         </Card>
@@ -357,24 +352,6 @@ export function RoomLobby({
               />
             </div>
 
-            {/* Card Profile */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Kart Profili</Label>
-              <Select
-                value={tempSettings.cardProfile}
-                onValueChange={(value) => handleSettingsChange("cardProfile", value as any)}
-              >
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="balanced">Dengeli</SelectItem>
-                  <SelectItem value="chaotic">Kaotik</SelectItem>
-                  <SelectItem value="strategic">Stratejik</SelectItem>
-                  <SelectItem value="minimal">Minimal</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
           <div className="flex gap-2 pt-4">

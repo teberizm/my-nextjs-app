@@ -17,7 +17,6 @@ export default function HomePage() {
     nightDuration: 60,
     dayDuration: 120,
     voteDuration: 45,
-    cardProfile: "balanced",
   })
 
   useEffect(() => {

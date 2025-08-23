@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Vote, Users } from "lucide-react"
+import { Vote, Users, Skull } from "lucide-react"
 import type { Player } from "@/lib/types"
+import { isTraitorRole } from "@/lib/game-logic"
 
 interface VotingPhaseProps {
   currentPlayer: Player
@@ -15,6 +16,7 @@ interface VotingPhaseProps {
   onSubmitVote: (targetId: string) => void
   timeRemaining: number
   hasVoted: boolean
+  playerNotes: Record<string, string[]>
 }
 
 export function VotingPhase({
@@ -24,12 +26,14 @@ export function VotingPhase({
   onSubmitVote,
   timeRemaining,
   hasVoted,
+  playerNotes,
 }: VotingPhaseProps) {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
 
   const alivePlayers = allPlayers.filter((p) => p.isAlive && p.id !== currentPlayer.id)
   const totalVotes = Object.keys(votes).length
   const aliveCount = allPlayers.filter((p) => p.isAlive).length
+  const notes = playerNotes[currentPlayer.id] || []
 
   const getPlayerInitials = (name: string) => {
     return name
@@ -70,6 +74,18 @@ export function VotingPhase({
               </Badge>
             </CardContent>
           </Card>
+          {notes.length > 0 && (
+            <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
+              <CardHeader>
+                <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                {notes.map((note, idx) => (
+                  <div key={idx}>{note}</div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Vote Progress */}
           <Card className="neon-border bg-card/50 backdrop-blur-sm">
@@ -96,7 +112,14 @@ export function VotingPhase({
                               {getPlayerInitials(player.name)}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="font-medium">{player.name}</span>
+                          <span className="font-medium flex items-center gap-1">
+                            {player.name}
+                            {isTraitorRole(currentPlayer.role!) &&
+                              isTraitorRole(player.role!) &&
+                              currentPlayer.id !== player.id && (
+                                <Skull className="w-3 h-3 text-destructive" />
+                              )}
+                          </span>
                         </div>
                         <Badge variant={voteCount > 0 ? "destructive" : "secondary"}>{voteCount} oy</Badge>
                       </div>
@@ -138,6 +161,19 @@ export function VotingPhase({
           </CardContent>
         </Card>
 
+        {notes.length > 0 && (
+          <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
+            <CardHeader>
+              <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              {notes.map((note, idx) => (
+                <div key={idx}>{note}</div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Player Selection */}
         <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
           <CardHeader>
@@ -161,19 +197,25 @@ export function VotingPhase({
                     onClick={() => setSelectedTarget(player.id)}
                   >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Avatar className="w-10 h-10 border-2 border-primary/30">
-                          <AvatarFallback className="bg-primary/20 text-primary font-semibold">
-                            {getPlayerInitials(player.name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-medium">{player.name}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {player.hasShield && "🛡️ Korumalı"}
-                            {player.isMuted && "🔇 Susturulmuş"}
-                          </div>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="w-10 h-10 border-2 border-primary/30">
+                        <AvatarFallback className="bg-primary/20 text-primary font-semibold">
+                          {getPlayerInitials(player.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <div className="font-medium flex items-center gap-1">
+                          {player.name}
+                          {isTraitorRole(currentPlayer.role!) &&
+                            isTraitorRole(player.role!) && (
+                              <Skull className="w-3 h-3 text-destructive" />
+                            )}
                         </div>
+                        <div className="text-sm text-muted-foreground">
+                          {player.hasShield && "🛡️ Korumalı"}
+                          {player.isMuted && "🔇 Susturulmuş"}
+                        </div>
+                      </div>
                       </div>
                       {voteCount > 0 && (
                         <Badge variant="destructive" className="text-xs">
@@ -190,6 +232,11 @@ export function VotingPhase({
 
         {/* Vote Button */}
         <div className="space-y-3">
+          {selectedTarget && (
+            <div className="text-sm text-muted-foreground text-center">
+              Seçilen: {allPlayers.find((p) => p.id === selectedTarget)?.name}
+            </div>
+          )}
           <Button
             onClick={handleVote}
             disabled={!selectedTarget}
