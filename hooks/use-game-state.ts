@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { assignRoles, getWinCondition } from "@/lib/game-logic"
 import { BotBehavior } from "@/lib/bot-players"
-import type { GamePhase, Player, Game, GameSettings, NightAction } from "@/lib/types"
+import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 
 interface GameStateHook {
   game: Game | null
@@ -84,25 +84,72 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
   const processNightActions = useCallback(() => {
     const killers = nightActions.filter((action) => action.actionType === "KILL")
-    const protectors = nightActions.filter(
-      (action) =>
-        action.actionType === "PROTECT" &&
-        players.find((p) => p.id === action.playerId)?.role !== "DELI",
-    )
 
     const protectedPlayers = new Set<string>()
     const survivorActors = new Set<string>()
-    protectors.forEach((action) => {
+    const revivedPlayers = new Set<string>()
+
+    const updatedActions: NightAction[] = nightActions.map((action) => {
       const actor = players.find((p) => p.id === action.playerId)
-      if (!actor) return
-      if (actor.role === "SURVIVOR") {
-        if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
-          protectedPlayers.add(actor.id)
-          survivorActors.add(actor.id)
+      const target = action.targetId ? players.find((p) => p.id === action.targetId) : null
+      let result: any = null
+
+      if (!actor) return { ...action }
+
+      if (action.actionType === "PROTECT" && actor.role !== "DELI") {
+        if (actor.role === "SURVIVOR") {
+          if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
+            protectedPlayers.add(actor.id)
+            survivorActors.add(actor.id)
+          }
+          result = { type: "PROTECT" }
+        } else if (actor.role === "DOCTOR") {
+          if (target && !target.isAlive) {
+            revivedPlayers.add(target.id)
+            result = { type: "REVIVE", success: true }
+          } else {
+            result = { type: "REVIVE", success: false }
+          }
+        } else if (action.targetId) {
+          protectedPlayers.add(action.targetId)
+          result = { type: "PROTECT" }
         }
-      } else if (action.targetId) {
-        protectedPlayers.add(action.targetId)
       }
+
+      if (action.actionType === "INVESTIGATE" && target) {
+        if (actor.role === "DELI") {
+          if (actor.displayRole === "WATCHER") {
+            const others = players.filter((p) => p.id !== target.id && p.id !== actor.id)
+            const randomVisitors = others
+              .sort(() => Math.random() - 0.5)
+              .slice(0, Math.min(2, others.length))
+              .map((p) => p.name)
+            result = { type: "WATCH", visitors: randomVisitors }
+          } else if (actor.displayRole === "DETECTIVE") {
+            const roles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
+            const fake = roles.sort(() => Math.random() - 0.5).slice(0, 2)
+            result = { type: "DETECT", roles: [fake[0], fake[1]] }
+          }
+        } else {
+          if (["WATCHER", "EVIL_WATCHER"].includes(actor.role!)) {
+            const visitors = nightActions
+              .filter(
+                (a) => a.targetId === target.id && a.playerId !== actor.id && a.playerId !== target.id,
+              )
+              .map((a) => players.find((p) => p.id === a.playerId)?.name || "")
+              .filter(Boolean)
+            result = { type: "WATCH", visitors }
+          } else if (["DETECTIVE", "EVIL_DETECTIVE"].includes(actor.role!)) {
+            const roles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
+            const actualRole = target.role
+            const fakeRole = roles.filter((r) => r !== actualRole)[Math.floor(Math.random() * (roles.length - 1))]
+            const shown = [actualRole, fakeRole].sort(() => Math.random() - 0.5)
+            result = { type: "DETECT", roles: [shown[0], shown[1]] }
+          }
+        }
+      }
+
+      return { ...action, result }
     })
 
     const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean)
@@ -121,6 +168,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           updatedPlayer.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
         }
 
+        if (revivedPlayers.has(player.id)) {
+          updatedPlayer.isAlive = true
+        }
+
         if (targetedPlayers.includes(player.id) && !protectedPlayers.has(player.id)) {
           updatedPlayer.isAlive = false
           newDeaths.push(updatedPlayer)
@@ -129,6 +180,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         return updatedPlayer
       }),
     )
+
+    setNightActions(updatedActions)
 
     setDeathsThisTurn(newDeaths)
   }, [nightActions, players])

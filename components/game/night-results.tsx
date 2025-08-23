@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Shield, Skull, Heart, Eye } from "lucide-react"
 import type { Player, NightAction } from "@/lib/types"
-import { getBaseRole, getRoleInfo, isTraitorRole } from "@/lib/game-logic"
+import { getRoleInfo } from "@/lib/game-logic"
 
 interface NightResultsProps {
   currentPlayer: Player
@@ -57,63 +57,42 @@ export function NightResults({
           icon: <Skull className="w-8 h-8 text-red-400" />,
         }
       case "PROTECT":
+        if (currentPlayer.role === "DOCTOR") {
+          return {
+            title: "İyileştirme", 
+            message: myAction.result?.success
+              ? `${targetPlayer.name} adlı oyuncuyu dirilttin!`
+              : `${targetPlayer.name} adlı oyuncuyu iyileştirdin fakat bir şey olmadı.`,
+            icon: <Shield className="w-8 h-8 text-blue-400" />,
+          }
+        }
         return {
           title: "Koruma Sağlandı",
           message: `${targetPlayer.name} adlı oyuncuyu bu gece korudun. Saldırılara karşı güvende.`,
           icon: <Shield className="w-8 h-8 text-blue-400" />,
         }
       case "INVESTIGATE":
-        const isWatcher = ["WATCHER", "EVIL_WATCHER"].includes(
-          isTraitorRole(currentPlayer.role!) ? getBaseRole(currentPlayer.role!) : visibleRole!,
-        )
-        if (currentPlayer.role === "DELI") {
-          if (currentPlayer.displayRole === "WATCHER") {
-            const others = allPlayers.filter((p) => p.id !== targetPlayer.id)
-            const randomVisitors = others
-              .sort(() => Math.random() - 0.5)
-              .slice(0, Math.min(2, others.length))
-              .map((p) => p.name)
-            return {
-              title: "Gözetleme Sonucu",
-              message: `${targetPlayer.name} ziyaret edenler: ${randomVisitors.join(", ") || "Kimse"}`,
-              icon: <Eye className="w-8 h-8 text-purple-400" />,
-            }
-          }
-          if (currentPlayer.displayRole === "DETECTIVE") {
-            const roles: string[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
-            const fake = roles.sort(() => Math.random() - 0.5).slice(0, 2)
-            return {
-              title: "Soruşturma Sonucu",
-              message: `${targetPlayer.name} için olası roller: ${fake[0]} veya ${fake[1]}`,
-              icon: <Eye className="w-8 h-8 text-purple-400" />,
-            }
-          }
-        }
-
-        if (isWatcher) {
-          const visitors = nightActions
-            .filter(
-              (a) =>
-                a.targetId === targetPlayer.id &&
-                a.playerId !== currentPlayer.id &&
-                a.playerId !== targetPlayer.id,
-            )
-            .map((a) => allPlayers.find((p) => p.id === a.playerId)?.name || "")
+        if (myAction.result?.type === "WATCH") {
           return {
             title: "Gözetleme Sonucu",
-            message: `${targetPlayer.name} ziyaret edenler: ${visitors.filter(Boolean).join(", ") || "Kimse"}`,
+            message: `${targetPlayer.name} ziyaret edenler: ${
+              (myAction.result.visitors as string[]).join(", ") || "Kimse"
+            }`,
             icon: <Eye className="w-8 h-8 text-purple-400" />,
           }
-        } else {
-          const actualRole = allPlayers.find((p) => p.id === targetPlayer.id)?.role
-          const roles: string[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
-          const fakeRole = roles.filter((r) => r !== actualRole)[Math.floor(Math.random() * (roles.length - 1))]
-          const shown = [actualRole, fakeRole].sort(() => Math.random() - 0.5)
+        }
+        if (myAction.result?.type === "DETECT") {
+          const roles = myAction.result.roles as string[]
           return {
             title: "Soruşturma Sonucu",
-            message: `${targetPlayer.name} için olası roller: ${shown[0]} veya ${shown[1]}`,
+            message: `${targetPlayer.name} için olası roller: ${roles[0]} veya ${roles[1]}`,
             icon: <Eye className="w-8 h-8 text-purple-400" />,
           }
+        }
+        return {
+          title: "Soruşturma Sonucu",
+          message: `${targetPlayer.name} hakkında bilgi edinilemedi.`,
+          icon: <Eye className="w-8 h-8 text-purple-400" />,
         }
       default:
         return {

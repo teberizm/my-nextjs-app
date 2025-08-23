@@ -96,6 +96,7 @@ export interface NightAction {
   targetId: string | null
   actionType: "KILL" | "PROTECT" | "INVESTIGATE"
   timestamp: Date
+  result?: any
 }
 
 export interface GameEvent {

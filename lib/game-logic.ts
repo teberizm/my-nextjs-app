@@ -172,7 +172,7 @@ export function getRoleInfo(role: PlayerRole) {
 export function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
   const alivePlayers = players.filter((p) => p.isAlive)
   const aliveTraitors = alivePlayers.filter((p) => isTraitorRole(p.role!))
-  const aliveInnocents = alivePlayers.filter((p) => isInnocentRole(p.role!))
+  const aliveNonTraitors = alivePlayers.filter((p) => !isTraitorRole(p.role!))
   const aliveBomber = alivePlayers.find((p) => p.role === "BOMBER")
 
   // Bomber wins if last one standing
@@ -180,8 +180,8 @@ export function getWinCondition(players: Player[]): { winner: string | null; gam
     return { winner: "BOMBER", gameEnded: true }
   }
 
-  // Traitors win if they equal or outnumber innocents
-  if (aliveTraitors.length >= aliveInnocents.length && aliveTraitors.length > 0) {
+  // Traitors win if they equal or outnumber all non-traitors
+  if (aliveTraitors.length >= aliveNonTraitors.length && aliveTraitors.length > 0) {
     return { winner: "TRAITORS", gameEnded: true }
   }
 
