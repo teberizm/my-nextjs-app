@@ -144,24 +144,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         }),
       )
 
-      const eliminatedPlayer = players.find((p) => p.id === eliminatedPlayerId)
-      if (eliminatedPlayer?.role === "BOMBER") {
-        const randomVictims = alivePlayers
-          .filter((p) => p.id !== eliminatedPlayerId)
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 2)
-
-        setPlayers((prevPlayers) =>
-          prevPlayers.map((player) => {
-            if (randomVictims.some((victim) => victim.id === player.id)) {
-              const deadPlayer = { ...player, isAlive: false }
-              newDeaths.push(deadPlayer)
-              return deadPlayer
-            }
-            return player
-          }),
-        )
-      }
+      // Bomber no longer causes extra deaths upon elimination
     }
 
     setDeathsThisTurn((prev) => [...prev, ...newDeaths])

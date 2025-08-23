@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
-import { Moon, Target, Shield, Skull } from "lucide-react"
-import { getRoleInfo } from "@/lib/game-logic"
+import { Moon, Target, Shield, Skull, Eye, Search } from "lucide-react"
+import { getRoleInfo, isTraitorRole } from "@/lib/game-logic"
 import type { Player } from "@/lib/types"
 
 interface NightActionsProps {
@@ -24,10 +24,10 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
   const alivePlayers = allPlayers.filter((p) => {
     if (!p.isAlive || p.id === currentPlayer.id) return false
     // Traitors cannot target other traitors
-    if (currentPlayer.role === "TRAITOR" && p.role === "TRAITOR") return false
+    if (isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
     return true
   })
-  const aliveTraitors = allPlayers.filter((p) => p.isAlive && p.role === "TRAITOR")
+  const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
 
   const handleSubmitAction = () => {
     onSubmitAction(selectedTarget)
@@ -45,25 +45,36 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
 
   const getActionText = () => {
     switch (currentPlayer.role) {
-      case "TRAITOR":
-        return "Öldürmek istediğin kişiyi seç"
       case "DOCTOR":
-        return "Korumak istediğin kişiyi seç"
-      case "SERIAL_KILLER":
-        return "Öldürmek istediğin kişiyi seç"
+        return "Diriltmek istediğin kişiyi seç"
+      case "GUARDIAN":
+        return "Engellemek istediğin kişiyi seç"
+      case "WATCHER":
+        return "Gözetlemek istediğin kişiyi seç"
+      case "DETECTIVE":
+        return "Soruşturmak istediğin kişiyi seç"
+      case "SURVIVOR":
+        return "Bu gece kendini koru"
       default:
+        if (isTraitorRole(currentPlayer.role!)) return "Öldürmek istediğin kişiyi seç"
         return "Bu gece bir aksiyon yapman gerekmiyor"
     }
   }
 
   const getActionIcon = () => {
     switch (currentPlayer.role) {
-      case "TRAITOR":
-      case "SERIAL_KILLER":
-        return <Skull className="w-5 h-5 text-destructive" />
       case "DOCTOR":
         return <Shield className="w-5 h-5 text-green-400" />
+      case "GUARDIAN":
+        return <Shield className="w-5 h-5 text-blue-400" />
+      case "WATCHER":
+        return <Eye className="w-5 h-5 text-yellow-400" />
+      case "DETECTIVE":
+        return <Search className="w-5 h-5 text-indigo-400" />
+      case "SURVIVOR":
+        return <Shield className="w-5 h-5 text-green-400" />
       default:
+        if (isTraitorRole(currentPlayer.role!)) return <Skull className="w-5 h-5 text-destructive" />
         return <Moon className="w-5 h-5 text-primary" />
     }
   }
@@ -133,7 +144,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
         </Card>
 
         {/* Special Info for Traitors */}
-        {currentPlayer.role === "TRAITOR" && aliveTraitors.length > 1 && (
+        {isTraitorRole(currentPlayer.role!) && aliveTraitors.length > 1 && (
           <Card className="bg-destructive/10 border-destructive/30 mb-6">
             <CardContent className="pt-6">
               <div className="flex items-center gap-2 mb-2">
@@ -141,13 +152,13 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
                 <span className="font-semibold text-destructive">Diğer Hainler</span>
               </div>
               <div className="flex gap-2">
-                {aliveTraitors
-                  .filter((p) => p.id !== currentPlayer.id)
-                  .map((traitor) => (
-                    <Badge key={traitor.id} variant="destructive" className="text-xs">
-                      {traitor.name}
-                    </Badge>
-                  ))}
+              {aliveTraitors
+                .filter((p) => p.id !== currentPlayer.id)
+                .map((traitor) => (
+                  <Badge key={traitor.id} variant="destructive" className="text-xs">
+                    {traitor.name}
+                  </Badge>
+                ))}
               </div>
             </CardContent>
           </Card>
@@ -163,7 +174,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {currentPlayer.role === "DOCTOR" && (
+              {["DOCTOR", "SURVIVOR"].includes(currentPlayer.role!) && (
                 <div
                   className={`p-3 rounded-lg border cursor-pointer transition-all ${
                     selectedTarget === currentPlayer.id
@@ -186,29 +197,30 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
                 </div>
               )}
 
-              {alivePlayers.map((player) => (
-                <div
-                  key={player.id}
-                  className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                    selectedTarget === player.id
-                      ? "border-primary bg-primary/20"
-                      : "border-border hover:border-primary/50"
-                  }`}
-                  onClick={() => setSelectedTarget(player.id)}
-                >
-                  <div className="flex items-center gap-3">
-                    <Avatar className="w-10 h-10 border-2 border-primary/30">
-                      <AvatarFallback className="bg-primary/20 text-primary font-semibold">
-                        {getPlayerInitials(player.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <div className="font-medium">{player.name}</div>
-                      <div className="text-sm text-muted-foreground">{player.hasShield && "🛡️ Korumalı"}</div>
+              {currentPlayer.role !== "SURVIVOR" &&
+                alivePlayers.map((player) => (
+                  <div
+                    key={player.id}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all ${
+                      selectedTarget === player.id
+                        ? "border-primary bg-primary/20"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                    onClick={() => setSelectedTarget(player.id)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Avatar className="w-10 h-10 border-2 border-primary/30">
+                        <AvatarFallback className="bg-primary/20 text-primary font-semibold">
+                          {getPlayerInitials(player.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <div className="font-medium">{player.name}</div>
+                        <div className="text-sm text-muted-foreground">{player.hasShield && "🛡️ Korumalı"}</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
             </div>
           </CardContent>
         </Card>
@@ -224,7 +236,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
             <span className="ml-2">Aksiyonu Gönder</span>
           </Button>
 
-          {currentPlayer.role === "TRAITOR" && (
+          {isTraitorRole(currentPlayer.role!) && (
             <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">
               Bu Gece Kimseyi Öldürme
             </Button>

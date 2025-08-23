@@ -235,7 +235,7 @@ export function useRealtimeGame(roomId: string, playerId: string) {
       const winnerMessages = {
         INNOCENTS: "Innocents Win! All traitors eliminated.",
         TRAITORS: "Traitors Win! They've taken control.",
-        SERIAL_KILLER: "Serial Killer Wins! Last one standing.",
+        BOMBER: "Bomber Wins! Left standing alone.",
       }
 
       addNotification({

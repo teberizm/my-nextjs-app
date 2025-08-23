@@ -11,7 +11,19 @@ export type GamePhase =
   | "RESOLVE"
   | "END"
 
-export type PlayerRole = "INNOCENT" | "TRAITOR" | "DOCTOR" | "SERIAL_KILLER" | "BOMBER" | "SURVIVOR"
+export type PlayerRole =
+  | "INNOCENT"
+  | "TRAITOR"
+  | "DOCTOR"
+  | "DELI"
+  | "GUARDIAN"
+  | "EVIL_GUARDIAN"
+  | "WATCHER"
+  | "EVIL_WATCHER"
+  | "DETECTIVE"
+  | "EVIL_DETECTIVE"
+  | "BOMBER"
+  | "SURVIVOR"
 
 export interface Player {
   id: string
@@ -52,7 +64,7 @@ export interface Game {
   seed: string
   startedAt?: Date
   endedAt?: Date
-  winningSide?: "INNOCENTS" | "TRAITORS" | "SERIAL_KILLER"
+  winningSide?: "INNOCENTS" | "TRAITORS" | "BOMBER"
 }
 
 export interface Card {
