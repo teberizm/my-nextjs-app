@@ -95,9 +95,29 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   }, [])
 
   const processNightActions = useCallback(() => {
-    const killers = nightActions.filter((action) => action.actionType === "KILL")
-    const bombPlacers = nightActions.filter((a) => a.actionType === "BOMB_PLANT")
-    const detonateAction = nightActions.find((a) => a.actionType === "BOMB_DETONATE")
+    const blockedPlayers = new Set<string>()
+    nightActions.forEach((action) => {
+      const actor = players.find((p) => p.id === action.playerId)
+      if (
+        action.actionType === "PROTECT" &&
+        actor &&
+        ["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) &&
+        action.targetId
+      ) {
+        blockedPlayers.add(action.targetId)
+        addPlayerNote(action.targetId, `${currentTurn}. Gece: Gardiyan tarafından tutuldun`)
+      }
+    })
+
+    const killers = nightActions.filter(
+      (action) => action.actionType === "KILL" && !blockedPlayers.has(action.playerId),
+    )
+    const bombPlacers = nightActions.filter(
+      (a) => a.actionType === "BOMB_PLANT" && !blockedPlayers.has(a.playerId),
+    )
+    const detonateAction = nightActions.find(
+      (a) => a.actionType === "BOMB_DETONATE" && !blockedPlayers.has(a.playerId),
+    )
 
     let newBombTargets = [...bombTargets]
     bombPlacers.forEach((a) => {
@@ -117,8 +137,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
       if (!actor) return { ...action }
 
+      if (blockedPlayers.has(actor.id)) {
+        return { ...action, result: { type: "BLOCKED" } }
+      }
+
       if (action.actionType === "PROTECT" && actor.role !== "DELI") {
-        if (actor.role === "SURVIVOR") {
+        if (["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) && action.targetId) {
+          result = { type: "BLOCK" }
+        } else if (actor.role === "SURVIVOR") {
           if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
             protectedPlayers.add(actor.id)
             survivorActors.add(actor.id)
@@ -156,7 +182,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           if (["WATCHER", "EVIL_WATCHER"].includes(actor.role!)) {
             const visitors = nightActions
               .filter(
-                (a) => a.targetId === target.id && a.playerId !== actor.id && a.playerId !== target.id,
+                (a) =>
+                  a.targetId === target.id &&
+                  a.playerId !== actor.id &&
+                  a.playerId !== target.id &&
+                  !blockedPlayers.has(a.playerId),
               )
               .map((a) => players.find((p) => p.id === a.playerId)?.name || "")
               .filter(Boolean)
@@ -186,6 +216,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
               note = `${prefix} Kendini korudun (${result.remaining} hak kaldı)`
             } else if (target) {
               note = `${prefix} ${target.name} oyuncusunu korudun`
+            }
+            break
+          case "BLOCK":
+            if (target) {
+              note = `${prefix} ${target.name} oyuncusunu tuttun`
             }
             break
           case "REVIVE":

@@ -29,7 +29,8 @@ export function assignRoles(players: Player[], settings: GameSettings): Player[]
   const shuffledPlayers = [...players].sort(() => Math.random() - 0.5)
   const roles: PlayerRole[] = []
 
-  const innocentRoles: PlayerRole[] = ["DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"]
+  const innocentOnlyRoles: PlayerRole[] = ["DOCTOR", "DELI"]
+  const convertibleRoles: PlayerRole[] = ["GUARDIAN", "WATCHER", "DETECTIVE"]
   const specialRoles: PlayerRole[] = ["BOMBER", "SURVIVOR"]
 
   const specialCount = Math.min(settings.specialRoleCount, players.length)
@@ -38,15 +39,16 @@ export function assignRoles(players: Player[], settings: GameSettings): Player[]
     roles.push(role)
   }
 
+  const allInnocentRoles = [...innocentOnlyRoles, ...convertibleRoles]
   while (roles.length < players.length) {
-    const role = innocentRoles[Math.floor(Math.random() * innocentRoles.length)]
+    const role = allInnocentRoles[Math.floor(Math.random() * allInnocentRoles.length)]
     roles.push(role)
   }
 
-  // Convert some roles to traitor variants
+  // Convert some roles to traitor variants (never Deli)
   const convertibleIndices = roles
     .map((role, index) => ({ role, index }))
-    .filter((r) => ["GUARDIAN", "WATCHER", "DETECTIVE"].includes(r.role))
+    .filter((r) => convertibleRoles.includes(r.role))
   const traitorSlots = convertibleIndices.sort(() => Math.random() - 0.5).slice(0, settings.traitorCount)
   traitorSlots.forEach(({ role, index }) => {
     if (role === "GUARDIAN") roles[index] = "EVIL_GUARDIAN"
