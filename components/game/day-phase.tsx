@@ -1,11 +1,9 @@
 "use client"
 
-import { useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Sun, Clock } from "lucide-react"
 import { PlayerStatus } from "./player-status"
-import { CardUsageManager } from "../cards/card-usage-manager"
 import type { Player } from "@/lib/types"
 
 interface DayPhaseProps {
@@ -13,10 +11,8 @@ interface DayPhaseProps {
   allPlayers: Player[]
   timeRemaining: number
   currentTurn: number
-  onCardUsed?: (cardId: string, effect: any) => void
-  selectedPlayersForCard?: string[]
-  usedCards?: string[]
-  currentPhase: string
+  playerNotes: Record<string, string[]>
+  deaths: Player[]
 }
 
 export function DayPhase({
@@ -24,21 +20,10 @@ export function DayPhase({
   allPlayers,
   timeRemaining,
   currentTurn,
-  onCardUsed,
-  selectedPlayersForCard = [],
-  usedCards = [],
-  currentPhase,
+  playerNotes,
+  deaths,
 }: DayPhaseProps) {
-  const [showCardManager, setShowCardManager] = useState(false)
-
-  const deadLastNight = allPlayers.filter((p) => !p.isAlive)
-
-  const handleCardUsed = (cardId: string, effect: any) => {
-    if (onCardUsed) {
-      onCardUsed(cardId, effect)
-    }
-    setShowCardManager(false)
-  }
+  const notes = playerNotes[currentPlayer.id] || []
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -58,18 +43,32 @@ export function DayPhase({
           </CardContent>
         </Card>
 
-        {/* Night Results */}
-        {deadLastNight.length > 0 && (
+        {/* Notes */}
+        {notes.length > 0 && (
+          <Card className="neon-border bg-card/50 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              {notes.map((note, idx) => (
+                <div key={idx}>{note}</div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Death Results */}
+        {deaths.length > 0 && (
           <Card className="bg-destructive/10 border-destructive/30">
             <CardHeader>
-              <CardTitle className="text-destructive font-work-sans">Gece Sonuçları</CardTitle>
+              <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                {deadLastNight.map((player) => (
+                {deaths.map((player, idx) => (
                   <div key={player.id} className="flex items-center gap-2">
                     <Badge variant="destructive" className="text-xs">
-                      Öldürüldü
+                      {idx + 1}.
                     </Badge>
                     <span className="font-medium">{player.name}</span>
                   </div>
@@ -93,15 +92,6 @@ export function DayPhase({
         </Card>
       </div>
 
-      <CardUsageManager
-        isOpen={showCardManager}
-        onClose={() => setShowCardManager(false)}
-        currentPlayer={currentPlayer}
-        allPlayers={allPlayers}
-        onCardUsed={handleCardUsed}
-        usedCards={usedCards}
-        currentPhase={currentPhase}
-      />
     </div>
   )
 }

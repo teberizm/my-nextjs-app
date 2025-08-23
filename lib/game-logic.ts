@@ -177,12 +177,15 @@ export function getWinCondition(players: Player[]): { winner: string | null; gam
     (p) => !isTraitorRole(p.role!) && p.role !== "BOMBER",
   )
 
-  // Bomber wins if last one standing
-  if (aliveBomber && alivePlayers.length === 1) {
-    return { winner: "BOMBER", gameEnded: true }
+  if (aliveBomber) {
+    if (alivePlayers.length === 1) {
+      return { winner: "BOMBER", gameEnded: true }
+    }
+    if (aliveTraitors.length === 0 && aliveNonTraitors.length === 1) {
+      return { winner: "BOMBER", gameEnded: true }
+    }
   }
 
-  // Traitors win if no bomber alive and they equal or outnumber all non-traitors
   if (
     !aliveBomber &&
     aliveTraitors.length >= aliveNonTraitors.length &&
@@ -191,8 +194,7 @@ export function getWinCondition(players: Player[]): { winner: string | null; gam
     return { winner: "TRAITORS", gameEnded: true }
   }
 
-  // Innocents win if no traitors left
-  if (aliveTraitors.length === 0) {
+  if (!aliveBomber && aliveTraitors.length === 0) {
     return { winner: "INNOCENTS", gameEnded: true }
   }
 

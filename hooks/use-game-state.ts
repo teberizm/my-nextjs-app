@@ -17,6 +17,7 @@ interface GameStateHook {
   selectedCardDrawers: string[]
   currentCardDrawer: string | null
   deathsThisTurn: Player[]
+  playerNotes: Record<string, string[]>
   startGame: (players: Player[], settings: GameSettings) => void
   advancePhase: () => void
   submitNightAction: (
@@ -40,9 +41,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [currentCardDrawer, setCurrentCardDrawer] = useState<string | null>(null)
   const [deathsThisTurn, setDeathsThisTurn] = useState<Player[]>([])
   const [bombTargets, setBombTargets] = useState<string[]>([])
+  const [playerNotes, setPlayerNotes] = useState<Record<string, string[]>>({})
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
   const isGameOwner = currentPlayer?.isOwner || false
+
+  const addPlayerNote = useCallback((playerId: string, note: string) => {
+    setPlayerNotes((prev) => ({
+      ...prev,
+      [playerId]: [...(prev[playerId] || []), note],
+    }))
+  }, [])
 
   useEffect(() => {
     if (timeRemaining > 0) {
@@ -82,6 +91,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
     setBombTargets([])
+    setPlayerNotes({})
   }, [])
 
   const processNightActions = useCallback(() => {
@@ -112,8 +122,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
             protectedPlayers.add(actor.id)
             survivorActors.add(actor.id)
+            const remaining = Math.max((actor.survivorShields || 0) - 1, 0)
+            result = { type: "PROTECT", remaining }
           }
-          result = { type: "PROTECT" }
         } else if (actor.role === "DOCTOR") {
           if (target && !target.isAlive) {
             revivedPlayers.add(target.id)
@@ -166,6 +177,47 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         detonateIndex = idx
       }
 
+      if (result) {
+        const prefix = `${currentTurn}. Gece:`
+        let note = ""
+        switch (result.type) {
+          case "PROTECT":
+            if (actor.role === "SURVIVOR" && action.targetId === actor.id) {
+              note = `${prefix} Kendini korudun (${result.remaining} hak kaldı)`
+            } else if (target) {
+              note = `${prefix} ${target.name} oyuncusunu korudun`
+            }
+            break
+          case "REVIVE":
+            if (target) {
+              note = result.success
+                ? `${prefix} ${target.name} oyuncusunu dirilttin`
+                : `${prefix} ${target.name} oyuncusunu diriltmeyi denedin`
+            }
+            break
+          case "WATCH":
+            if (target) {
+              const visitorsText =
+                result.visitors && result.visitors.length > 0
+                  ? result.visitors.join(", ")
+                  : "kimse gelmedi"
+              note = `${prefix} ${target.name} oyuncusunu izledin: ${visitorsText}`
+            }
+            break
+          case "DETECT":
+            if (target) {
+              note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${result.roles[0]}, ${result.roles[1]}`
+            }
+            break
+          case "BOMB_PLANT":
+            if (target) {
+              note = `${prefix} ${target.name} oyuncusuna bomba yerleştirdin`
+            }
+            break
+        }
+        if (note) addPlayerNote(actor.id, note)
+      }
+
       return { ...action, result }
     })
 
@@ -177,6 +229,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         ...updatedActions[detonateIndex],
         result: { type: "BOMB_DETONATE", victims: victimNames },
       }
+      const actorId = updatedActions[detonateIndex].playerId
+      const victimsText = victimNames.length > 0 ? victimNames.join(", ") : "kimse ölmedi"
+      addPlayerNote(actorId, `${currentTurn}. Gece: bombaları patlattın: ${victimsText}`)
       newBombTargets = []
     }
 
@@ -219,7 +274,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setNightActions(updatedActions)
 
     setDeathsThisTurn(newDeaths)
-  }, [nightActions, players, bombTargets])
+  }, [nightActions, players, bombTargets, currentTurn, addPlayerNote])
 
   const processVotes = useCallback(() => {
     const voteCount: Record<string, number> = {}
@@ -235,12 +290,18 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     let maxVotes = 0
     let eliminatedPlayerId: string | null = null
 
-    Object.entries(voteCount).forEach(([playerId, count]) => {
+    const entries = Object.entries(voteCount)
+    entries.forEach(([playerId, count]) => {
       if (count > maxVotes) {
         maxVotes = count
         eliminatedPlayerId = playerId
       }
     })
+
+    const topPlayers = entries.filter(([, count]) => count === maxVotes)
+    if (topPlayers.length > 1) {
+      eliminatedPlayerId = null
+    }
 
     const newDeaths: Player[] = []
 
@@ -285,6 +346,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         break
 
       case "NIGHT_RESULTS":
+        setPlayers((prev) => prev.map((p) => ({ ...p, hasShield: false })))
         setCurrentPhase("DEATH_ANNOUNCEMENT")
         setTimeRemaining(5)
         setNightActions([])
@@ -476,6 +538,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    playerNotes,
     startGame,
     advancePhase,
     submitNightAction,

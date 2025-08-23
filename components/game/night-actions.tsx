@@ -17,9 +17,10 @@ interface NightActionsProps {
     actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
   ) => void
   timeRemaining: number
+  playerNotes: Record<string, string[]>
 }
 
-export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRemaining }: NightActionsProps) {
+export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRemaining, playerNotes }: NightActionsProps) {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
   const [actionSubmitted, setActionSubmitted] = useState(false)
   const [mode, setMode] = useState<"KILL" | "ROLE">(
@@ -31,6 +32,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
   const roleInfo = getRoleInfo(mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole)
   const survivorShields = currentPlayer.survivorShields || 0
   const isSurvivorWithoutShields = visibleRole === "SURVIVOR" && survivorShields <= 0
+  const notes = playerNotes[currentPlayer.id] || []
   const alivePlayers = allPlayers.filter((p) => {
     if (!p.isAlive || p.id === currentPlayer.id) return false
     // Traitors cannot target other traitors
@@ -77,7 +79,9 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
       case "DETECTIVE":
         return "Soruşturmak istediğin kişiyi seç"
       case "SURVIVOR":
-        return survivorShields > 0 ? "Bu gece kendini koru" : "Koruma hakkın bitti"
+        return survivorShields > 0
+          ? `Kendini koru - ${survivorShields} hakkın var`
+          : "Koruma hakkın kalmadı"
       case "BOMBER":
         return "Bomba yerleştirmek istediğin kişiyi seç"
       default:
@@ -169,6 +173,20 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
             <p className="text-sm text-muted-foreground">Kalan süre</p>
           </CardContent>
         </Card>
+
+        {/* Notes */}
+        {notes.length > 0 && (
+          <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
+            <CardHeader>
+              <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              {notes.map((note, idx) => (
+                <div key={idx}>{note}</div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Special Info for Traitors */}
         {isTraitorRole(currentPlayer.role!) && aliveTraitors.length > 1 && (

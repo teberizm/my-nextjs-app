@@ -37,24 +37,14 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    playerNotes,
   } = useGameState(currentPlayerId)
-
-  const [selectedPlayersForCard, setSelectedPlayersForCard] = useState<string[]>([])
 
   useEffect(() => {
     if (!game) {
       startGame(initialPlayers, gameSettings)
     }
   }, [game, initialPlayers, gameSettings, startGame])
-
-  useEffect(() => {
-    const selectedPlayers = players
-      .filter((p) => p.isAlive)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 2)
-      .map((p) => p.id)
-    setSelectedPlayersForCard(selectedPlayers)
-  }, [currentTurn, currentPhase]) // Only recalculate when turn or phase changes
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
 
@@ -93,6 +83,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           allPlayers={players}
           onSubmitAction={handleNightAction}
           timeRemaining={timeRemaining}
+          playerNotes={playerNotes}
         />
       )
 
@@ -129,8 +120,8 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           allPlayers={players}
           timeRemaining={timeRemaining}
           currentTurn={currentTurn}
-          selectedPlayersForCard={selectedPlayersForCard}
-          onCardDrawRequest={() => console.log("Card draw requested")}
+          playerNotes={playerNotes}
+          deaths={deathsThisTurn}
         />
       )
 
