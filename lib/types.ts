@@ -27,6 +27,7 @@ export interface Player {
   id: string
   name: string
   role?: PlayerRole
+  displayRole?: PlayerRole
   isOwner: boolean
   isAlive: boolean
   isMuted: boolean

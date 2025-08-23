@@ -4,6 +4,19 @@ export function isTraitorRole(role: PlayerRole) {
   return ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(role)
 }
 
+export function getBaseRole(role: PlayerRole): PlayerRole {
+  switch (role) {
+    case "EVIL_GUARDIAN":
+      return "GUARDIAN"
+    case "EVIL_WATCHER":
+      return "WATCHER"
+    case "EVIL_DETECTIVE":
+      return "DETECTIVE"
+    default:
+      return role
+  }
+}
+
 export function isInnocentRole(role: PlayerRole) {
   return ["DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"].includes(role)
 }
@@ -41,10 +54,15 @@ export function assignRoles(players: Player[], settings: GameSettings): Player[]
 
   const shuffledRoles = roles.sort(() => Math.random() - 0.5)
 
-  return shuffledPlayers.map((player, index) => ({
-    ...player,
-    role: shuffledRoles[index],
-  }))
+  return shuffledPlayers.map((player, index) => {
+    const role = shuffledRoles[index]
+    if (role === "DELI") {
+      const innocentRoles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE"]
+      const fakeRole = innocentRoles[Math.floor(Math.random() * innocentRoles.length)]
+      return { ...player, role, displayRole: fakeRole }
+    }
+    return { ...player, role, displayRole: role }
+  })
 }
 
 export function getRoleInfo(role: PlayerRole) {

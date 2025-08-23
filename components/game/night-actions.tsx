@@ -6,31 +6,45 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Moon, Target, Shield, Skull, Eye, Search } from "lucide-react"
-import { getRoleInfo, isTraitorRole } from "@/lib/game-logic"
+import { getRoleInfo, isTraitorRole, getBaseRole } from "@/lib/game-logic"
 import type { Player } from "@/lib/types"
 
 interface NightActionsProps {
   currentPlayer: Player
   allPlayers: Player[]
-  onSubmitAction: (targetId: string | null) => void
+  onSubmitAction: (
+    targetId: string | null,
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE",
+  ) => void
   timeRemaining: number
 }
 
 export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRemaining }: NightActionsProps) {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
   const [actionSubmitted, setActionSubmitted] = useState(false)
+  const [mode, setMode] = useState<"KILL" | "ROLE">(
+    isTraitorRole(currentPlayer.role!) ? "KILL" : "ROLE",
+  )
 
-  const roleInfo = getRoleInfo(currentPlayer.role!)
+  const visibleRole = currentPlayer.displayRole || currentPlayer.role!
+  const baseRole = getBaseRole(currentPlayer.role!)
+  const roleInfo = getRoleInfo(mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole)
   const alivePlayers = allPlayers.filter((p) => {
     if (!p.isAlive || p.id === currentPlayer.id) return false
     // Traitors cannot target other traitors
-    if (isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
+    if (mode === "KILL" && isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
     return true
   })
   const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
 
   const handleSubmitAction = () => {
-    onSubmitAction(selectedTarget)
+    let actionType: "KILL" | "PROTECT" | "INVESTIGATE" = "KILL"
+    if (mode === "ROLE") {
+      const roleToUse = isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole
+      if (["DOCTOR", "GUARDIAN", "SURVIVOR"].includes(roleToUse)) actionType = "PROTECT"
+      if (["WATCHER", "DETECTIVE"].includes(roleToUse)) actionType = "INVESTIGATE"
+    }
+    onSubmitAction(selectedTarget, actionType)
     setActionSubmitted(true)
   }
 
@@ -44,7 +58,9 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
   }
 
   const getActionText = () => {
-    switch (currentPlayer.role) {
+    const role = mode === "ROLE" ? (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) : visibleRole
+    if (mode === "KILL" && isTraitorRole(currentPlayer.role!)) return "Öldürmek istediğin kişiyi seç"
+    switch (role) {
       case "DOCTOR":
         return "Diriltmek istediğin kişiyi seç"
       case "GUARDIAN":
@@ -56,13 +72,14 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
       case "SURVIVOR":
         return "Bu gece kendini koru"
       default:
-        if (isTraitorRole(currentPlayer.role!)) return "Öldürmek istediğin kişiyi seç"
         return "Bu gece bir aksiyon yapman gerekmiyor"
     }
   }
 
   const getActionIcon = () => {
-    switch (currentPlayer.role) {
+    const role = mode === "ROLE" ? (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) : visibleRole
+    if (mode === "KILL" && isTraitorRole(currentPlayer.role!)) return <Skull className="w-5 h-5 text-destructive" />
+    switch (role) {
       case "DOCTOR":
         return <Shield className="w-5 h-5 text-green-400" />
       case "GUARDIAN":
@@ -74,7 +91,6 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
       case "SURVIVOR":
         return <Shield className="w-5 h-5 text-green-400" />
       default:
-        if (isTraitorRole(currentPlayer.role!)) return <Skull className="w-5 h-5 text-destructive" />
         return <Moon className="w-5 h-5 text-primary" />
     }
   }
@@ -164,6 +180,25 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
           </Card>
         )}
 
+        {isTraitorRole(currentPlayer.role!) && (
+          <div className="flex gap-2 mb-6">
+            <Button
+              variant={mode === "ROLE" ? "default" : "outline"}
+              className="flex-1"
+              onClick={() => setMode("ROLE")}
+            >
+              Rolünü Kullan
+            </Button>
+            <Button
+              variant={mode === "KILL" ? "destructive" : "outline"}
+              className="flex-1"
+              onClick={() => setMode("KILL")}
+            >
+              Öldür
+            </Button>
+          </div>
+        )}
+
         {/* Target Selection */}
         <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
           <CardHeader>
@@ -174,7 +209,11 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {["DOCTOR", "SURVIVOR"].includes(currentPlayer.role!) && (
+              {["DOCTOR", "SURVIVOR"].includes(
+                mode === "ROLE" && isTraitorRole(currentPlayer.role!)
+                  ? baseRole
+                  : visibleRole,
+              ) && (
                 <div
                   className={`p-3 rounded-lg border cursor-pointer transition-all ${
                     selectedTarget === currentPlayer.id
@@ -197,7 +236,9 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
                 </div>
               )}
 
-              {currentPlayer.role !== "SURVIVOR" &&
+              {!(mode === "ROLE" && ["SURVIVOR"].includes(
+                isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole,
+              )) &&
                 alivePlayers.map((player) => (
                   <div
                     key={player.id}
@@ -236,7 +277,7 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
             <span className="ml-2">Aksiyonu Gönder</span>
           </Button>
 
-          {isTraitorRole(currentPlayer.role!) && (
+          {isTraitorRole(currentPlayer.role!) && mode === "KILL" && (
             <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">
               Bu Gece Kimseyi Öldürme
             </Button>

@@ -68,8 +68,10 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     )
   }
 
-  const handleNightAction = (targetId: string | null) => {
-    const actionType = currentPlayer.role === "DOCTOR" ? "PROTECT" : "KILL"
+  const handleNightAction = (
+    targetId: string | null,
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE",
+  ) => {
     submitNightAction(currentPlayer.id, targetId, actionType)
   }
 

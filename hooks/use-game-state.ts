@@ -19,7 +19,11 @@ interface GameStateHook {
   deathsThisTurn: Player[]
   startGame: (players: Player[], settings: GameSettings) => void
   advancePhase: () => void
-  submitNightAction: (playerId: string, targetId: string | null, actionType: "KILL" | "PROTECT") => void
+  submitNightAction: (
+    playerId: string,
+    targetId: string | null,
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE",
+  ) => void
   submitVote: (voterId: string, targetId: string) => void
   resetGame: () => void
 }
@@ -80,7 +84,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
   const processNightActions = useCallback(() => {
     const killers = nightActions.filter((action) => action.actionType === "KILL")
-    const protectors = nightActions.filter((action) => action.actionType === "PROTECT")
+    const protectors = nightActions.filter(
+      (action) =>
+        action.actionType === "PROTECT" &&
+        players.find((p) => p.id === action.playerId)?.role !== "DELI",
+    )
 
     const protectedPlayers = new Set(protectors.map((action) => action.targetId).filter(Boolean))
     const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean)
@@ -107,7 +115,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setDeathsThisTurn(newDeaths)
 
     setNightActions([])
-  }, [nightActions])
+  }, [nightActions, players])
 
   const processVotes = useCallback(() => {
     const voteCount: Record<string, number> = {}
@@ -233,16 +241,19 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }
   }, [currentPhase, game, players, processNightActions, processVotes, selectedCardDrawers, currentCardDrawer])
 
-  const submitNightAction = useCallback((playerId: string, targetId: string | null, actionType: "KILL" | "PROTECT") => {
-    const newAction: NightAction = {
-      playerId,
-      targetId,
-      actionType,
-      timestamp: new Date(),
-    }
+  const submitNightAction = useCallback(
+    (playerId: string, targetId: string | null, actionType: "KILL" | "PROTECT" | "INVESTIGATE") => {
+      const newAction: NightAction = {
+        playerId,
+        targetId,
+        actionType,
+        timestamp: new Date(),
+      }
 
-    setNightActions((prev) => [...prev.filter((action) => action.playerId !== playerId), newAction])
-  }, [])
+      setNightActions((prev) => [...prev.filter((action) => action.playerId !== playerId), newAction])
+    },
+    [],
+  )
 
   const submitVote = useCallback(
     (voterId: string, targetId: string) => {
@@ -284,8 +295,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           setTimeout(() => {
             BotBehavior.simulateNightAction(bot, players).then((targetId) => {
               if (targetId && bot.role) {
-                let actionType: "KILL" | "PROTECT" = "KILL"
+                let actionType: "KILL" | "PROTECT" | "INVESTIGATE" = "KILL"
                 if (bot.role.id === "doctor") actionType = "PROTECT"
+                if (["watcher", "detective"].includes(bot.role.id)) actionType = "INVESTIGATE"
 
                 submitNightAction(bot.id, targetId, actionType)
                 console.log(
