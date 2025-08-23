@@ -17,6 +17,7 @@ interface GameStateHook {
   selectedCardDrawers: string[]
   currentCardDrawer: string | null
   deathsThisTurn: Player[]
+  bombTargets: string[]
   playerNotes: Record<string, string[]>
   startGame: (players: Player[], settings: GameSettings) => void
   advancePhase: () => void
@@ -121,7 +122,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     let newBombTargets = [...bombTargets]
     bombPlacers.forEach((a) => {
-      if (a.targetId) newBombTargets.push(a.targetId)
+      if (a.targetId && !newBombTargets.includes(a.targetId)) newBombTargets.push(a.targetId)
     })
 
     const protectedPlayers = new Set<string>()
@@ -449,6 +450,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       targetId: string | null,
       actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
     ) => {
+      const actor = players.find((p) => p.id === playerId)
+      if (!actor || !actor.isAlive) return
+
       const newAction: NightAction = {
         playerId,
         targetId,
@@ -458,7 +462,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
       setNightActions((prev) => [...prev.filter((action) => action.playerId !== playerId), newAction])
     },
-    [],
+    [players],
   )
 
   const submitVote = useCallback(
@@ -573,6 +577,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    bombTargets,
     playerNotes,
     startGame,
     advancePhase,

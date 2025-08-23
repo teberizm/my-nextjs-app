@@ -12,6 +12,7 @@ import type { Player } from "@/lib/types"
 interface NightActionsProps {
   currentPlayer: Player
   allPlayers: Player[]
+  bombTargets: string[]
   onSubmitAction: (
     targetId: string | null,
     actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
@@ -20,7 +21,7 @@ interface NightActionsProps {
   playerNotes: Record<string, string[]>
 }
 
-export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRemaining, playerNotes }: NightActionsProps) {
+export function NightActions({ currentPlayer, allPlayers, bombTargets, onSubmitAction, timeRemaining, playerNotes }: NightActionsProps) {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
   const [actionSubmitted, setActionSubmitted] = useState(false)
   const [mode, setMode] = useState<"KILL" | "ROLE">(
@@ -33,12 +34,15 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
   const survivorShields = currentPlayer.survivorShields || 0
   const isSurvivorWithoutShields = visibleRole === "SURVIVOR" && survivorShields <= 0
   const notes = playerNotes[currentPlayer.id] || []
-  const alivePlayers = allPlayers.filter((p) => {
+  let alivePlayers = allPlayers.filter((p) => {
     if (!p.isAlive || p.id === currentPlayer.id) return false
     // Traitors cannot target other traitors
     if (mode === "KILL" && isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
     return true
   })
+  if (visibleRole === "BOMBER") {
+    alivePlayers = alivePlayers.filter((p) => !bombTargets.includes(p.id))
+  }
   const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
 
   const handleSubmitAction = () => {
@@ -108,6 +112,22 @@ export function NightActions({ currentPlayer, allPlayers, onSubmitAction, timeRe
       default:
         return <Moon className="w-5 h-5 text-primary" />
     }
+  }
+
+  if (!currentPlayer.isAlive) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="max-w-md w-full neon-border bg-card/50 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <div className="w-16 h-16 bg-gray-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Skull className="w-8 h-8 text-gray-400" />
+            </div>
+            <CardTitle className="font-work-sans">Öldün</CardTitle>
+            <CardDescription>Artık aksiyon yapamazsın</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
   }
 
   if (!roleInfo.nightAction || isSurvivorWithoutShields) {

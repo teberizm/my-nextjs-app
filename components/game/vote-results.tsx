@@ -34,7 +34,7 @@ export function VoteResults({ players, votes, deaths, timeRemaining }: VoteResul
         )}
         <div className="space-y-2 mb-4">
           {players
-            .filter((p) => p.isAlive || deaths.find((d) => d.id === p.id))
+            .filter((p) => p.isAlive)
             .map((player) => (
               <div key={player.id} className="flex items-center justify-between text-sm">
                 <span>{player.name}</span>

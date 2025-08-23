@@ -37,6 +37,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    bombTargets,
     playerNotes,
   } = useGameState(currentPlayerId)
 
@@ -81,6 +82,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
         <NightActions
           currentPlayer={currentPlayer}
           allPlayers={players}
+          bombTargets={bombTargets}
           onSubmitAction={handleNightAction}
           timeRemaining={timeRemaining}
           playerNotes={playerNotes}

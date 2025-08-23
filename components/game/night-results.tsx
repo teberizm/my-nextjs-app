@@ -74,6 +74,13 @@ export function NightResults({
             message: "Hedef bulunamadı.",
             icon: <Heart className="w-8 h-8 text-gray-400" />,
           }
+        if (myAction.result?.type === "BLOCK") {
+          return {
+            title: "Engelleme",
+            message: `${targetPlayer.name} adlı oyuncuyu bu gece engelledin.`,
+            icon: <Shield className="w-8 h-8 text-blue-400" />,
+          }
+        }
         if (currentPlayer.role === "DOCTOR") {
           return {
             title: "İyileştirme",
