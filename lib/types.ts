@@ -12,8 +12,6 @@ export type GamePhase =
   | "END"
 
 export type PlayerRole =
-  | "INNOCENT"
-  | "TRAITOR"
   | "DOCTOR"
   | "DELI"
   | "GUARDIAN"

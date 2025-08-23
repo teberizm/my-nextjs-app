@@ -1,45 +1,44 @@
 import type { Player, PlayerRole, GameSettings } from "./types"
 
 export function isTraitorRole(role: PlayerRole) {
-  return ["TRAITOR", "EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(role)
+  return ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(role)
 }
 
 export function isInnocentRole(role: PlayerRole) {
-  return ["INNOCENT", "DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"].includes(role)
+  return ["DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"].includes(role)
 }
 
 export function assignRoles(players: Player[], settings: GameSettings): Player[] {
   const shuffledPlayers = [...players].sort(() => Math.random() - 0.5)
   const roles: PlayerRole[] = []
 
-  // Add traitors
-  for (let i = 0; i < settings.traitorCount; i++) {
-    roles.push("TRAITOR")
-  }
-
-  // Add special roles
-  const specialRoles: PlayerRole[] = [
+  const baseRoles: PlayerRole[] = [
     "DOCTOR",
     "DELI",
     "GUARDIAN",
-    "EVIL_GUARDIAN",
     "WATCHER",
-    "EVIL_WATCHER",
     "DETECTIVE",
-    "EVIL_DETECTIVE",
     "BOMBER",
     "SURVIVOR",
   ]
-  const selectedSpecialRoles = specialRoles.sort(() => Math.random() - 0.5).slice(0, settings.specialRoleCount)
 
-  roles.push(...selectedSpecialRoles)
-
-  // Fill remaining with innocents
+  // Randomly assign roles from base pool
   while (roles.length < players.length) {
-    roles.push("INNOCENT")
+    const randomRole = baseRoles[Math.floor(Math.random() * baseRoles.length)]
+    roles.push(randomRole)
   }
 
-  // Shuffle roles and assign
+  // Convert some roles to traitor variants
+  const convertibleIndices = roles
+    .map((role, index) => ({ role, index }))
+    .filter((r) => ["GUARDIAN", "WATCHER", "DETECTIVE"].includes(r.role))
+  const traitorSlots = convertibleIndices.sort(() => Math.random() - 0.5).slice(0, settings.traitorCount)
+  traitorSlots.forEach(({ role, index }) => {
+    if (role === "GUARDIAN") roles[index] = "EVIL_GUARDIAN"
+    if (role === "WATCHER") roles[index] = "EVIL_WATCHER"
+    if (role === "DETECTIVE") roles[index] = "EVIL_DETECTIVE"
+  })
+
   const shuffledRoles = roles.sort(() => Math.random() - 0.5)
 
   return shuffledPlayers.map((player, index) => ({
@@ -50,24 +49,6 @@ export function assignRoles(players: Player[], settings: GameSettings): Player[]
 
 export function getRoleInfo(role: PlayerRole) {
   const roleData = {
-    INNOCENT: {
-      name: "Masum",
-      description: "Hainleri bul ve onları elendir. Çoğunluk kazanır.",
-      color: "text-blue-400",
-      bgColor: "bg-blue-400/20",
-      icon: "👤",
-      team: "INNOCENTS",
-      nightAction: false,
-    },
-    TRAITOR: {
-      name: "Hain",
-      description: "Gece masumları öldür. Sayıları eşitlene kadar saklan.",
-      color: "text-red-400",
-      bgColor: "bg-red-400/20",
-      icon: "🗡️",
-      team: "TRAITORS",
-      nightAction: true,
-    },
     DOCTOR: {
       name: "Doktor",
       description: "Bir kişiyi seçer. Ölü ise diriltir.",
