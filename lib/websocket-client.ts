@@ -15,6 +15,7 @@ export type GameEvent =
   | "VOTE_CAST"
   | "VOTE_RESULT"
   | "PLAYER_ELIMINATED"
+  | "PLAYER_KICKED"
   | "PLAYER_REVIVED"
   | "WINNER_DECLARED"
   | "GAME_ENDED"
@@ -37,6 +38,8 @@ export class WebSocketClient extends EventEmitter {
   private reconnectInterval = 3000
   private roomId: string | null = null
   private playerId: string | null = null
+  private playerName: string | null = null
+  private isOwner = false
 
   constructor() {
     super()
@@ -51,9 +54,11 @@ export class WebSocketClient extends EventEmitter {
     }, 1000)
   }
 
-  connect(roomId: string, playerId: string) {
+  connect(roomId: string, playerId: string, playerName: string, isOwner: boolean) {
     this.roomId = roomId
     this.playerId = playerId
+    this.playerName = playerName
+    this.isOwner = isOwner
 
     if (!this.connected) {
       this.simulateConnection()
@@ -64,6 +69,26 @@ export class WebSocketClient extends EventEmitter {
       this.emit("ROOM_JOINED", {
         type: "ROOM_JOINED",
         payload: { roomId, playerId },
+        timestamp: new Date(),
+        roomId,
+        playerId,
+      })
+
+      this.emit("PLAYER_LIST_UPDATED", {
+        type: "PLAYER_LIST_UPDATED",
+        payload: {
+          players: [
+            {
+              id: playerId,
+              name: playerName,
+              isOwner,
+              isAlive: true,
+              isMuted: false,
+              hasShield: false,
+            },
+          ],
+          newPlayer: { name: playerName },
+        },
         timestamp: new Date(),
         roomId,
         playerId,

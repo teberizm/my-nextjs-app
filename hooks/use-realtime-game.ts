@@ -22,7 +22,12 @@ interface GameNotification {
   autoHide?: boolean
 }
 
-export function useRealtimeGame(roomId: string, playerId: string) {
+export function useRealtimeGame(
+  roomId: string,
+  playerId: string,
+  playerName = "Player",
+  isOwner = false,
+) {
   const [gameState, setGameState] = useState<RealtimeGameState>({
     connected: false,
     room: null,
@@ -230,6 +235,23 @@ export function useRealtimeGame(roomId: string, playerId: string) {
     [addNotification],
   )
 
+  const handlePlayerKicked = useCallback(
+    (data: GameEventData) => {
+      setGameState((prev) => ({
+        ...prev,
+        players: prev.players.filter((p) => p.id !== data.payload.playerId),
+      }))
+
+      addNotification({
+        type: "warning",
+        title: "Oyuncu Atıldı",
+        message: "Bir oyuncu odadan atıldı",
+        autoHide: true,
+      })
+    },
+    [addNotification],
+  )
+
   const handleWinnerDeclared = useCallback(
     (data: GameEventData) => {
       const winnerMessages = {
@@ -270,6 +292,7 @@ export function useRealtimeGame(roomId: string, playerId: string) {
     wsClient.on("CARD_APPLIED", handleCardApplied)
     wsClient.on("VOTE_CAST", handleVoteCast)
     wsClient.on("PLAYER_ELIMINATED", handlePlayerEliminated)
+    wsClient.on("PLAYER_KICKED", handlePlayerKicked)
     wsClient.on("PLAYER_REVIVED", handlePlayerRevived)
     wsClient.on("WINNER_DECLARED", handleWinnerDeclared)
     wsClient.on("ERROR", handleError)
@@ -283,6 +306,7 @@ export function useRealtimeGame(roomId: string, playerId: string) {
       wsClient.off("CARD_APPLIED", handleCardApplied)
       wsClient.off("VOTE_CAST", handleVoteCast)
       wsClient.off("PLAYER_ELIMINATED", handlePlayerEliminated)
+      wsClient.off("PLAYER_KICKED", handlePlayerKicked)
       wsClient.off("PLAYER_REVIVED", handlePlayerRevived)
       wsClient.off("WINNER_DECLARED", handleWinnerDeclared)
       wsClient.off("ERROR", handleError)
@@ -303,41 +327,14 @@ export function useRealtimeGame(roomId: string, playerId: string) {
 
   // Connect to room on mount
   useEffect(() => {
-    wsClient.connect(roomId, playerId)
+    wsClient.connect(roomId, playerId, playerName, isOwner)
 
     return () => {
       wsClient.disconnect()
     }
-  }, [roomId, playerId])
+  }, [roomId, playerId, playerName, isOwner])
 
-  // Simulate some events for demo purposes
-  useEffect(() => {
-    if (gameState.connected) {
-      // Simulate other players joining
-      setTimeout(() => {
-        wsClient.simulateEvent("PLAYER_LIST_UPDATED", {
-          players: [
-            { id: playerId, name: "You", isOwner: true, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player2", name: "Alice", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player3", name: "Bob", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-          ],
-          newPlayer: { name: "Alice" },
-        })
-      }, 2000)
-
-      setTimeout(() => {
-        wsClient.simulateEvent("PLAYER_LIST_UPDATED", {
-          players: [
-            { id: playerId, name: "You", isOwner: true, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player2", name: "Alice", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player3", name: "Bob", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player4", name: "Charlie", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-          ],
-          newPlayer: { name: "Bob" },
-        })
-      }, 4000)
-    }
-  }, [gameState.connected, playerId])
+  // Demo placeholder - real server should broadcast player updates
 
   const sendEvent = useCallback((eventType: GameEvent, payload: any) => {
     wsClient.sendEvent(eventType, payload)
