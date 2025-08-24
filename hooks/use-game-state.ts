@@ -55,25 +55,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }))
   }, [])
 
-  useEffect(() => {
-    if (timeRemaining > 0) {
-      const timer = setTimeout(() => {
-        setTimeRemaining((prev) => prev - 1)
-      }, 1000)
-      return () => clearTimeout(timer)
-    } else if (
-      timeRemaining === 0 &&
-      currentPhase !== "LOBBY" &&
-      currentPhase !== "END" &&
-      currentPhase !== "CARD_DRAWING"
-    ) {
-      const phaseTimer = setTimeout(() => {
-        advancePhase()
-      }, 100)
-      return () => clearTimeout(phaseTimer)
-    }
-  }, [timeRemaining, currentPhase, advancePhase])
-
   const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
     const playersWithRoles = assignRoles(gamePlayers, settings)
 
@@ -576,6 +557,25 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setDeathLog([])
     setBombTargets([])
   }, [])
+
+  useEffect(() => {
+    if (timeRemaining > 0) {
+      const timer = setTimeout(() => {
+        setTimeRemaining((prev) => prev - 1)
+      }, 1000)
+      return () => clearTimeout(timer)
+    } else if (
+      timeRemaining === 0 &&
+      currentPhase !== "LOBBY" &&
+      currentPhase !== "END" &&
+      currentPhase !== "CARD_DRAWING"
+    ) {
+      const phaseTimer = setTimeout(() => {
+        advancePhase()
+      }, 100)
+      return () => clearTimeout(phaseTimer)
+    }
+  }, [timeRemaining, currentPhase, advancePhase])
 
   // Bot simulation removed for realtime play
 
