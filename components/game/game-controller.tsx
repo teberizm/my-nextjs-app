@@ -112,7 +112,6 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           selectedCardDrawers={selectedCardDrawers}
           currentCardDrawer={currentCardDrawer}
           currentPlayerId={currentPlayerId}
-          timeRemaining={timeRemaining}
           onCardDrawn={advancePhase}
         />
       )
