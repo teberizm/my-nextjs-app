@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Users, Crown, Copy, QrCode, Settings, Play, UserX, Lock, Unlock, Share2 } from "lucide-react"
 import type { Room, Player, GameSettings } from "@/lib/types"
-
+import { wsClient } from "@/lib/websocket-client" 
 interface RoomLobbyProps {
   room: Room
   currentPlayer: Player
@@ -248,7 +248,16 @@ export function RoomLobby({
       {currentPlayer.isOwner && (
         <div className="max-w-md mx-auto">
           <Button
-            onClick={onStartGame}
+            onClick={() => {
+        // Local state (yönetici kendi ekranında hemen başlasın)
+        onStartGame()
+
+        // WebSocket ile tüm odadakilere bildir
+        wsClient.sendEvent("GAME_STARTED", {
+          players: room.players,
+          settings: gameSettings,
+        })
+      }}
             disabled={!canStartGame}
             className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
           >
