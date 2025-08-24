@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { assignRoles, getWinCondition } from "@/lib/game-logic"
 import { BotBehavior } from "@/lib/bot-players"
 import type { GamePhase, Player, Game, GameSettings, NightAction } from "@/lib/types"
+import { wsClient, type GameEventData } from "@/lib/websocket-client"
 
 interface GameStateHook {
   game: Game | null
@@ -38,6 +39,46 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
   const isGameOwner = currentPlayer?.isOwner || false
+
+  useEffect(() => {
+    const toPlayer = (id: string): Player => ({
+      id,
+      name: id,
+      isOwner: false,
+      isAlive: true,
+      isMuted: false,
+      hasShield: false,
+      connectedAt: new Date(),
+    })
+
+    const normalize = (raw: any[]): Player[] =>
+      raw.map((p: any) => (typeof p === "string" ? toPlayer(p) : { ...toPlayer(p.id), ...p }))
+
+    const handleRoomJoined = (data: GameEventData) => {
+      if (data.payload?.players) {
+        setPlayers(normalize(data.payload.players))
+      } else if (data.payload?.playerId) {
+        setPlayers((prev) => {
+          const exists = prev.some((p) => p.id === data.payload.playerId)
+          return exists ? prev : [...prev, toPlayer(data.payload.playerId as string)]
+        })
+      }
+    }
+
+    const handlePlayerListUpdated = (data: GameEventData) => {
+      if (data.payload?.players) {
+        setPlayers(normalize(data.payload.players))
+      }
+    }
+
+    wsClient.on("ROOM_JOINED", handleRoomJoined)
+    wsClient.on("PLAYER_LIST_UPDATED", handlePlayerListUpdated)
+
+    return () => {
+      wsClient.off("ROOM_JOINED", handleRoomJoined)
+      wsClient.off("PLAYER_LIST_UPDATED", handlePlayerListUpdated)
+    }
+  }, [])
 
   useEffect(() => {
     if (timeRemaining > 0) {
