@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { assignRoles, getWinCondition, getRoleInfo } from "@/lib/game-logic"
-import { BotBehavior } from "@/lib/bot-players"
 import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 
 interface GameStateHook {
@@ -62,13 +61,18 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         setTimeRemaining((prev) => prev - 1)
       }, 1000)
       return () => clearTimeout(timer)
-    } else if (timeRemaining === 0 && currentPhase !== "LOBBY" && currentPhase !== "END") {
+    } else if (
+      timeRemaining === 0 &&
+      currentPhase !== "LOBBY" &&
+      currentPhase !== "END" &&
+      currentPhase !== "CARD_DRAWING"
+    ) {
       const phaseTimer = setTimeout(() => {
         advancePhase()
       }, 100)
       return () => clearTimeout(phaseTimer)
     }
-  }, [timeRemaining, currentPhase])
+  }, [timeRemaining, currentPhase, advancePhase])
 
   const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
     const playersWithRoles = assignRoles(gamePlayers, settings)
@@ -100,14 +104,20 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
   const processNightActions = useCallback(() => {
     const blockedPlayers = new Set<string>()
-    nightActions.forEach((action) => {
-      const actor = players.find((p) => p.id === action.playerId)
-      if (
-        action.actionType === "PROTECT" &&
-        actor &&
-        ["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) &&
-        action.targetId
-      ) {
+    const guardianActions = nightActions
+      .filter((action) => {
+        const actor = players.find((p) => p.id === action.playerId)
+        return (
+          action.actionType === "PROTECT" &&
+          actor &&
+          ["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) &&
+          action.targetId
+        )
+      })
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+
+    guardianActions.forEach((action) => {
+      if (!blockedPlayers.has(action.playerId) && action.targetId) {
         blockedPlayers.add(action.targetId)
         addPlayerNote(action.targetId, `${currentTurn}. Gece: Gardiyan tarafından tutuldun`)
       }
@@ -116,6 +126,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     const killers = nightActions.filter(
       (action) => action.actionType === "KILL" && !blockedPlayers.has(action.playerId),
     )
+    const killTargets = killers.map((k) => k.targetId).filter(Boolean) as string[]
     const bombPlacers = nightActions.filter(
       (a) => a.actionType === "BOMB_PLANT" && !blockedPlayers.has(a.playerId),
     )
@@ -156,7 +167,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
             result = { type: "PROTECT", remaining }
           }
         } else if (actor.role === "DOCTOR") {
-          if (target && !target.isAlive) {
+          if (target && (!target.isAlive || killTargets.includes(target.id))) {
             revivedPlayers.add(target.id)
             result = { type: "REVIVE", success: true }
           } else {
@@ -276,7 +287,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       newBombTargets = []
     }
 
-    const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean) as string[]
+    const targetedPlayers = killTargets
     const bombVictimIds = bombVictims.map((p) => p.id)
 
     const newDeaths: Player[] = []
@@ -297,10 +308,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           updatedPlayer.isAlive = true
         }
 
-        if (bombVictimIds.includes(player.id)) {
+        if (bombVictimIds.includes(player.id) && !revivedPlayers.has(player.id)) {
           updatedPlayer.isAlive = false
           newDeaths.push(updatedPlayer)
-        } else if (targetedPlayers.includes(player.id) && !protectedPlayers.has(player.id)) {
+        } else if (
+          targetedPlayers.includes(player.id) &&
+          !protectedPlayers.has(player.id) &&
+          !revivedPlayers.has(player.id)
+        ) {
           updatedPlayer.isAlive = false
           newDeaths.push(updatedPlayer)
         }
@@ -404,7 +419,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     switch (currentPhase) {
       case "ROLE_REVEAL":
         setCurrentPhase("NIGHT")
-        setTimeRemaining(15)
+        setTimeRemaining(game?.settings.nightDuration || 15)
         break
 
       case "NIGHT":
@@ -429,7 +444,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         setCurrentCardDrawer(cardDrawers[0]?.id || null)
         if (cardDrawers.length > 0) {
           setCurrentPhase("CARD_DRAWING")
-          setTimeRemaining(10)
+          setTimeRemaining(0)
         } else {
           setCurrentPhase("DAY_DISCUSSION")
           setTimeRemaining(game?.settings.dayDuration || 15)
@@ -440,14 +455,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         const currentIndex = selectedCardDrawers.indexOf(currentCardDrawer || "")
         if (currentIndex < selectedCardDrawers.length - 1) {
           setCurrentCardDrawer(selectedCardDrawers[currentIndex + 1])
-          setTimeRemaining(10)
+          setTimeRemaining(0)
         } else {
-        setCurrentPhase("DAY_DISCUSSION")
-        setTimeRemaining(game?.settings.dayDuration || 15)
-        setSelectedCardDrawers([])
-        setCurrentCardDrawer(null)
-      }
-      break
+          setCurrentPhase("DAY_DISCUSSION")
+          setTimeRemaining(game?.settings.dayDuration || 15)
+          setSelectedCardDrawers([])
+          setCurrentCardDrawer(null)
+        }
+        break
 
       case "DAY_DISCUSSION":
         setCurrentPhase("VOTE")
@@ -538,75 +553,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setBombTargets([])
   }, [])
 
-  useEffect(() => {
-    if (currentPhase === "NIGHT") {
-      const botPlayers = players.filter((p) => p.isBot && p.isAlive && p.role)
-
-      botPlayers.forEach((bot) => {
-        const hasAction = nightActions.some((action) => action.playerId === bot.id)
-        if (!hasAction) {
-          const delay = Math.random() * 2000 + 1000 // 1-3 seconds delay
-          setTimeout(() => {
-            BotBehavior.simulateNightAction(bot, players).then((targetId) => {
-              if (targetId && bot.role) {
-                let actionType: "KILL" | "PROTECT" | "INVESTIGATE" = "KILL"
-                if (bot.role.id === "doctor") actionType = "PROTECT"
-                if (["watcher", "detective"].includes(bot.role.id)) actionType = "INVESTIGATE"
-
-                submitNightAction(bot.id, targetId, actionType)
-                console.log(
-                  `[v0] Bot ${bot.name} performed ${actionType} on ${players.find((p) => p.id === targetId)?.name}`,
-                )
-              }
-            })
-          }, delay)
-        }
-      })
-    }
-  }, [currentPhase, players, nightActions, submitNightAction])
-
-  useEffect(() => {
-    if (currentPhase === "VOTE") {
-      const botPlayers = players.filter((p) => p.isBot && p.isAlive)
-
-      botPlayers.forEach((bot) => {
-        if (!votes[bot.id]) {
-          const delay = Math.random() * 3000 + 1000 // 1-4 seconds delay
-          setTimeout(() => {
-            // Double check bot hasn't voted yet to prevent race conditions
-            setVotes((currentVotes) => {
-              if (currentVotes[bot.id]) {
-                return currentVotes // Bot already voted, don't vote again
-              }
-
-              BotBehavior.simulateVote(bot, players).then((targetId) => {
-                if (targetId) {
-                  submitVote(bot.id, targetId)
-                  console.log(`[v0] Bot ${bot.name} voted for ${players.find((p) => p.id === targetId)?.name}`)
-                }
-              })
-
-              return currentVotes
-            })
-          }, delay)
-        }
-      })
-    }
-  }, [currentPhase, players]) // Removed votes from dependency array to prevent infinite loops
-
-  useEffect(() => {
-    if (currentPhase === "CARD_DRAWING" && currentCardDrawer) {
-      const currentDrawer = players.find((p) => p.id === currentCardDrawer)
-
-      if (currentDrawer?.isBot) {
-        const delay = Math.random() * 3000 + 2000 // 2-5 seconds
-        setTimeout(() => {
-          console.log(`[v0] Bot ${currentDrawer.name} automatically drew a card`)
-          advancePhase()
-        }, delay)
-      }
-    }
-  }, [currentPhase, currentCardDrawer, players, advancePhase])
+  // Bot simulation removed for realtime play
 
   return {
     game,
