@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Trophy, RotateCcw, Home, Crown } from "lucide-react"
-import { getRoleInfo } from "@/lib/game-logic"
+import { getRoleInfo, isTraitorRole, isInnocentRole } from "@/lib/game-logic"
 import type { Game, Player } from "@/lib/types"
 
 interface GameEndProps {
@@ -35,13 +35,13 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
           bgColor: "bg-red-400/20",
           icon: "🗡️",
         }
-      case "SERIAL_KILLER":
+      case "BOMBER":
         return {
-          title: "Seri Katil Kazandı!",
+          title: "Bombacı Kazandı!",
           description: "Tek başına hayatta kaldı",
-          color: "text-purple-400",
-          bgColor: "bg-purple-400/20",
-          icon: "🔪",
+          color: "text-orange-400",
+          bgColor: "bg-orange-400/20",
+          icon: "💣",
         }
       default:
         return {
@@ -60,11 +60,11 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
 
     switch (game.winningSide) {
       case "INNOCENTS":
-        return ["INNOCENT", "DOCTOR", "BOMBER"].includes(currentPlayer.role)
+        return isInnocentRole(currentPlayer.role) || currentPlayer.role === "SURVIVOR"
       case "TRAITORS":
-        return currentPlayer.role === "TRAITOR"
-      case "SERIAL_KILLER":
-        return currentPlayer.role === "SERIAL_KILLER"
+        return isTraitorRole(currentPlayer.role)
+      case "BOMBER":
+        return currentPlayer.role === "BOMBER"
       default:
         return false
     }
@@ -84,11 +84,11 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
 
     switch (game.winningSide) {
       case "INNOCENTS":
-        return ["INNOCENT", "DOCTOR", "BOMBER"].includes(player.role)
+        return isInnocentRole(player.role) || player.role === "SURVIVOR"
       case "TRAITORS":
-        return player.role === "TRAITOR"
-      case "SERIAL_KILLER":
-        return player.role === "SERIAL_KILLER"
+        return isTraitorRole(player.role)
+      case "BOMBER":
+        return player.role === "BOMBER"
       default:
         return false
     }

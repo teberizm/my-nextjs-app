@@ -1,89 +1,170 @@
 import type { Player, PlayerRole, GameSettings } from "./types"
 
+export function isTraitorRole(role: PlayerRole) {
+  return ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(role)
+}
+
+export function getBaseRole(role: PlayerRole): PlayerRole {
+  switch (role) {
+    case "EVIL_GUARDIAN":
+      return "GUARDIAN"
+    case "EVIL_WATCHER":
+      return "WATCHER"
+    case "EVIL_DETECTIVE":
+      return "DETECTIVE"
+    default:
+      return role
+  }
+}
+
+export function isInnocentRole(role: PlayerRole) {
+  return ["DOCTOR", "DELI", "GUARDIAN", "WATCHER", "DETECTIVE"].includes(role)
+}
+
+export function isSpecialRole(role: PlayerRole) {
+  return ["BOMBER", "SURVIVOR"].includes(role)
+}
+
 export function assignRoles(players: Player[], settings: GameSettings): Player[] {
   const shuffledPlayers = [...players].sort(() => Math.random() - 0.5)
   const roles: PlayerRole[] = []
 
-  // Add traitors
-  for (let i = 0; i < settings.traitorCount; i++) {
-    roles.push("TRAITOR")
+  const innocentOnlyRoles: PlayerRole[] = ["DOCTOR", "DELI"]
+  const convertibleRoles: PlayerRole[] = ["GUARDIAN", "WATCHER", "DETECTIVE"]
+  const specialRoles: PlayerRole[] = ["BOMBER", "SURVIVOR"]
+
+  const specialCount = Math.min(settings.specialRoleCount, players.length)
+  for (let i = 0; i < specialCount; i++) {
+    const role = specialRoles[Math.floor(Math.random() * specialRoles.length)]
+    roles.push(role)
   }
 
-  // Add special roles
-  const specialRoles: PlayerRole[] = ["DOCTOR", "SERIAL_KILLER", "BOMBER", "SURVIVOR"]
-  const selectedSpecialRoles = specialRoles.sort(() => Math.random() - 0.5).slice(0, settings.specialRoleCount)
-
-  roles.push(...selectedSpecialRoles)
-
-  // Fill remaining with innocents
+  const allInnocentRoles = [...innocentOnlyRoles, ...convertibleRoles]
   while (roles.length < players.length) {
-    roles.push("INNOCENT")
+    const role = allInnocentRoles[Math.floor(Math.random() * allInnocentRoles.length)]
+    roles.push(role)
   }
 
-  // Shuffle roles and assign
+  // Convert some roles to traitor variants (never Deli)
+  const convertibleIndices = roles
+    .map((role, index) => ({ role, index }))
+    .filter((r) => convertibleRoles.includes(r.role))
+  const traitorSlots = convertibleIndices.sort(() => Math.random() - 0.5).slice(0, settings.traitorCount)
+  traitorSlots.forEach(({ role, index }) => {
+    if (role === "GUARDIAN") roles[index] = "EVIL_GUARDIAN"
+    if (role === "WATCHER") roles[index] = "EVIL_WATCHER"
+    if (role === "DETECTIVE") roles[index] = "EVIL_DETECTIVE"
+  })
+
   const shuffledRoles = roles.sort(() => Math.random() - 0.5)
 
-  return shuffledPlayers.map((player, index) => ({
-    ...player,
-    role: shuffledRoles[index],
-  }))
+  return shuffledPlayers.map((player, index) => {
+    const role = shuffledRoles[index]
+    if (role === "DELI") {
+      const innocentRoles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE"]
+      const fakeRole = innocentRoles[Math.floor(Math.random() * innocentRoles.length)]
+      return { ...player, role, displayRole: fakeRole, survivorShields: 0 }
+    }
+    return {
+      ...player,
+      role,
+      displayRole: role,
+      survivorShields: role === "SURVIVOR" ? 2 : 0,
+    }
+  })
 }
 
 export function getRoleInfo(role: PlayerRole) {
   const roleData = {
-    INNOCENT: {
-      name: "Masum",
-      description: "Hainleri bul ve onları elendir. Çoğunluk kazanır.",
-      color: "text-blue-400",
-      bgColor: "bg-blue-400/20",
-      icon: "👤",
-      team: "INNOCENTS",
-      nightAction: false,
-    },
-    TRAITOR: {
-      name: "Hain",
-      description: "Gece masumları öldür. Sayıları eşitlene kadar saklan.",
-      color: "text-red-400",
-      bgColor: "bg-red-400/20",
-      icon: "🗡️",
-      team: "TRAITORS",
-      nightAction: true,
-    },
     DOCTOR: {
       name: "Doktor",
-      description: "Her gece bir kişiyi koru. Kendini de koruyabilirsin.",
+      description: "Bir kişiyi seçer. Ölü ise diriltir.",
       color: "text-green-400",
       bgColor: "bg-green-400/20",
       icon: "⚕️",
       team: "INNOCENTS",
       nightAction: true,
     },
-    SERIAL_KILLER: {
-      name: "Seri Katil",
-      description: "Tek başına kazan. Her gece birini öldür.",
-      color: "text-purple-400",
-      bgColor: "bg-purple-400/20",
-      icon: "🔪",
-      team: "SERIAL_KILLER",
+    DELI: {
+      name: "Deli",
+      description: "Masum görünümlü; verdiğin bilgiler her zaman yanlış.",
+      color: "text-pink-400",
+      bgColor: "bg-pink-400/20",
+      icon: "🤪",
+      team: "INNOCENTS",
+      nightAction: false,
+    },
+    GUARDIAN: {
+      name: "Gardiyan",
+      description: "Bir kişiyi seçer. O gece rolünü kullanamaz.",
+      color: "text-blue-400",
+      bgColor: "bg-blue-400/20",
+      icon: "🛡️",
+      team: "INNOCENTS",
+      nightAction: true,
+    },
+    EVIL_GUARDIAN: {
+      name: "Hain Gardiyan",
+      description: "Bir kişiyi engelleyebilir veya hainlerle öldürmeye katılabilir.",
+      color: "text-red-400",
+      bgColor: "bg-red-400/20",
+      icon: "🛡️",
+      team: "TRAITORS",
+      nightAction: true,
+    },
+    WATCHER: {
+      name: "Gözcü",
+      description: "Bir kişiyi seçer. Ziyaret edenleri görür.",
+      color: "text-yellow-400",
+      bgColor: "bg-yellow-400/20",
+      icon: "👁️",
+      team: "INNOCENTS",
+      nightAction: true,
+    },
+    EVIL_WATCHER: {
+      name: "Hain Gözcü",
+      description: "Bir kişiyi izleyebilir veya hainlerle öldürmeye katılabilir.",
+      color: "text-red-400",
+      bgColor: "bg-red-400/20",
+      icon: "👁️",
+      team: "TRAITORS",
+      nightAction: true,
+    },
+    DETECTIVE: {
+      name: "Dedektif",
+      description: "Bir kişiyi seçer. Sistem iki rol gösterir, biri doğru biri yanlış.",
+      color: "text-indigo-400",
+      bgColor: "bg-indigo-400/20",
+      icon: "🕵️",
+      team: "INNOCENTS",
+      nightAction: true,
+    },
+    EVIL_DETECTIVE: {
+      name: "Hain Dedektif",
+      description: "Birini soruşturabilir veya hainlerle öldürmeye katılabilir.",
+      color: "text-red-400",
+      bgColor: "bg-red-400/20",
+      icon: "🕵️",
+      team: "TRAITORS",
       nightAction: true,
     },
     BOMBER: {
       name: "Bombacı",
-      description: "Elendiğinde yanındaki oyuncuları da öldür.",
+      description: "Bomba yerleştirip istediğinde patlatır. Tek başına kalırsa kazanır.",
       color: "text-orange-400",
       bgColor: "bg-orange-400/20",
       icon: "💣",
-      team: "INNOCENTS",
-      nightAction: false,
+      team: "BOMBER",
+      nightAction: true,
     },
     SURVIVOR: {
-      name: "Hayatta Kalan",
-      description: "Sadece hayatta kal. Oyun sonuna kadar yaşa.",
+      name: "Survivor",
+      description: "Oyun sonuna kadar hayatta kal. İki kez kendini koru.",
       color: "text-yellow-400",
       bgColor: "bg-yellow-400/20",
       icon: "🛡️",
       team: "SURVIVOR",
-      nightAction: false,
+      nightAction: true,
     },
   }
 
@@ -92,23 +173,27 @@ export function getRoleInfo(role: PlayerRole) {
 
 export function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
   const alivePlayers = players.filter((p) => p.isAlive)
-  const aliveTraitors = alivePlayers.filter((p) => p.role === "TRAITOR")
-  const aliveInnocents = alivePlayers.filter((p) => p.role === "INNOCENT" || p.role === "DOCTOR" || p.role === "BOMBER")
-  const aliveSerialKiller = alivePlayers.find((p) => p.role === "SERIAL_KILLER")
-  const aliveSurvivor = alivePlayers.find((p) => p.role === "SURVIVOR")
+  const aliveTraitors = alivePlayers.filter((p) => isTraitorRole(p.role!))
+  const aliveBombers = alivePlayers.filter((p) => p.role === "BOMBER")
+  const aliveNonTraitors = alivePlayers.filter(
+    (p) => !isTraitorRole(p.role!) && p.role !== "BOMBER",
+  )
 
-  // Serial Killer wins if they're the last one standing or only with survivor
-  if (aliveSerialKiller && (alivePlayers.length === 1 || (alivePlayers.length === 2 && aliveSurvivor))) {
-    return { winner: "SERIAL_KILLER", gameEnded: true }
+  if (aliveBombers.length > 0) {
+    if (alivePlayers.length - aliveBombers.length <= 1) {
+      return { winner: "BOMBER", gameEnded: true }
+    }
   }
 
-  // Traitors win if they equal or outnumber innocents
-  if (aliveTraitors.length >= aliveInnocents.length && aliveTraitors.length > 0) {
+  if (
+    aliveBombers.length === 0 &&
+    aliveTraitors.length >= aliveNonTraitors.length &&
+    aliveTraitors.length > 0
+  ) {
     return { winner: "TRAITORS", gameEnded: true }
   }
 
-  // Innocents win if no traitors or serial killer left
-  if (aliveTraitors.length === 0 && !aliveSerialKiller) {
+  if (aliveBombers.length === 0 && aliveTraitors.length === 0) {
     return { winner: "INNOCENTS", gameEnded: true }
   }
 

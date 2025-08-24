@@ -11,16 +11,28 @@ export type GamePhase =
   | "RESOLVE"
   | "END"
 
-export type PlayerRole = "INNOCENT" | "TRAITOR" | "DOCTOR" | "SERIAL_KILLER" | "BOMBER" | "SURVIVOR"
+export type PlayerRole =
+  | "DOCTOR"
+  | "DELI"
+  | "GUARDIAN"
+  | "EVIL_GUARDIAN"
+  | "WATCHER"
+  | "EVIL_WATCHER"
+  | "DETECTIVE"
+  | "EVIL_DETECTIVE"
+  | "BOMBER"
+  | "SURVIVOR"
 
 export interface Player {
   id: string
   name: string
   role?: PlayerRole
+  displayRole?: PlayerRole
   isOwner: boolean
   isAlive: boolean
   isMuted: boolean
   hasShield: boolean
+  survivorShields?: number
   connectedAt: Date
 }
 
@@ -37,10 +49,10 @@ export interface Room {
 export interface GameSettings {
   traitorCount: number
   specialRoleCount: number
+  cardDrawCount: number
   nightDuration: number
   dayDuration: number
   voteDuration: number
-  cardProfile: "STANDARD" | "CHAOS" | "QUICK"
 }
 
 export interface Game {
@@ -52,7 +64,7 @@ export interface Game {
   seed: string
   startedAt?: Date
   endedAt?: Date
-  winningSide?: "INNOCENTS" | "TRAITORS" | "SERIAL_KILLER"
+  winningSide?: "INNOCENTS" | "TRAITORS" | "BOMBER"
 }
 
 export interface Card {
@@ -82,8 +94,9 @@ export interface GameState {
 export interface NightAction {
   playerId: string
   targetId: string | null
-  actionType: "KILL" | "PROTECT" | "INVESTIGATE"
+  actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE"
   timestamp: Date
+  result?: any
 }
 
 export interface GameEvent {

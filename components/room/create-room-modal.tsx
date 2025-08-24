@@ -6,7 +6,6 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Slider } from "@/components/ui/slider"
 import {
   Dialog,
@@ -16,7 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Settings, Users, Clock, Zap } from "lucide-react"
+import { Settings, Users, Clock } from "lucide-react"
 import type { GameSettings } from "@/lib/types"
 
 interface CreateRoomModalProps {
@@ -30,10 +29,10 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
   const [maxPlayers, setMaxPlayers] = useState([8])
   const [traitorCount, setTraitorCount] = useState([2])
   const [specialRoleCount, setSpecialRoleCount] = useState([2])
+  const [cardDrawCount, setCardDrawCount] = useState([2])
   const [nightDuration, setNightDuration] = useState([60])
   const [dayDuration, setDayDuration] = useState([120])
   const [voteDuration, setVoteDuration] = useState([45])
-  const [cardProfile, setCardProfile] = useState<"STANDARD" | "CHAOS" | "QUICK">("STANDARD")
 
   const handleCreate = () => {
     onCreateRoom({
@@ -41,10 +40,10 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
       maxPlayers: maxPlayers[0],
       traitorCount: traitorCount[0],
       specialRoleCount: specialRoleCount[0],
+      cardDrawCount: cardDrawCount[0],
       nightDuration: nightDuration[0],
       dayDuration: dayDuration[0],
       voteDuration: voteDuration[0],
-      cardProfile,
     })
     setIsOpen(false)
   }
@@ -113,6 +112,19 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
             />
           </div>
 
+          {/* Card Draw Count */}
+          <div className="space-y-3">
+            <Label className="text-purple-400">Kart Çekecek Oyuncu Sayısı: {cardDrawCount[0]}</Label>
+            <Slider
+              value={cardDrawCount}
+              onValueChange={setCardDrawCount}
+              max={4}
+              min={0}
+              step={1}
+              className="w-full"
+            />
+          </div>
+
           {/* Time Settings */}
           <div className="space-y-4">
             <Label className="flex items-center gap-2">
@@ -159,23 +171,6 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
             </div>
           </div>
 
-          {/* Card Profile */}
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-accent" />
-              Kart Profili
-            </Label>
-            <Select value={cardProfile} onValueChange={(value: any) => setCardProfile(value)}>
-              <SelectTrigger className="bg-input border-border">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-popover border-border">
-                <SelectItem value="STANDARD">Standart - Dengeli oyun</SelectItem>
-                <SelectItem value="CHAOS">Kaos - Daha fazla etki</SelectItem>
-                <SelectItem value="QUICK">Hızlı - Kısa turlar</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
         </div>
 
         <div className="flex gap-3">
