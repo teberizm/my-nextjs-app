@@ -9,6 +9,7 @@ import { VotingPhase } from "./voting-phase"
 import { GameEnd } from "./game-end"
 import { NightResults } from "./night-results"
 import { DeathAnnouncement } from "./death-announcement"
+import { VoteResults } from "./vote-results"
 import { CardDrawingPhase } from "./card-drawing-phase"
 import type { Player, GameSettings } from "@/lib/types"
 
@@ -36,24 +37,16 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    deathLog,
+    bombTargets,
+    playerNotes,
   } = useGameState(currentPlayerId)
-
-  const [selectedPlayersForCard, setSelectedPlayersForCard] = useState<string[]>([])
 
   useEffect(() => {
     if (!game) {
       startGame(initialPlayers, gameSettings)
     }
   }, [game, initialPlayers, gameSettings, startGame])
-
-  useEffect(() => {
-    const selectedPlayers = players
-      .filter((p) => p.isAlive)
-      .sort(() => Math.random() - 0.5)
-      .slice(0, 2)
-      .map((p) => p.id)
-    setSelectedPlayersForCard(selectedPlayers)
-  }, [currentTurn, currentPhase]) // Only recalculate when turn or phase changes
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
 
@@ -68,8 +61,10 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     )
   }
 
-  const handleNightAction = (targetId: string | null) => {
-    const actionType = currentPlayer.role === "DOCTOR" ? "PROTECT" : "KILL"
+  const handleNightAction = (
+    targetId: string | null,
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
+  ) => {
     submitNightAction(currentPlayer.id, targetId, actionType)
   }
 
@@ -88,8 +83,11 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
         <NightActions
           currentPlayer={currentPlayer}
           allPlayers={players}
+          deaths={deathLog}
+          bombTargets={bombTargets}
           onSubmitAction={handleNightAction}
           timeRemaining={timeRemaining}
+          playerNotes={playerNotes}
         />
       )
 
@@ -126,8 +124,8 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           allPlayers={players}
           timeRemaining={timeRemaining}
           currentTurn={currentTurn}
-          selectedPlayersForCard={selectedPlayersForCard}
-          onCardDrawRequest={() => console.log("Card draw requested")}
+          playerNotes={playerNotes}
+          deaths={deathLog}
         />
       )
 
@@ -140,21 +138,20 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           onSubmitVote={handleVote}
           timeRemaining={timeRemaining}
           hasVoted={hasVoted}
+          playerNotes={playerNotes}
+          deaths={deathLog}
         />
       )
 
     case "RESOLVE":
       return (
-        <div className="min-h-screen bg-background flex items-center justify-center p-4">
-          <div className="text-center">
-            <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4 pulse-glow">
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            </div>
-            <h2 className="text-2xl font-bold font-work-sans mb-2">Sonuçlar Hesaplanıyor</h2>
-            <p className="text-muted-foreground">Oylar sayılıyor ve sonuçlar belirleniyor...</p>
-            <div className="text-lg font-bold text-primary mt-4">{timeRemaining}s</div>
-          </div>
-        </div>
+        <VoteResults
+          players={players}
+          votes={votes}
+          deaths={deathsThisTurn}
+          deathLog={deathLog}
+          timeRemaining={timeRemaining}
+        />
       )
 
     case "END":

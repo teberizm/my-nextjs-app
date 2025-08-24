@@ -1,9 +1,8 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { assignRoles, getWinCondition } from "@/lib/game-logic"
-import { BotBehavior } from "@/lib/bot-players"
-import type { GamePhase, Player, Game, GameSettings, NightAction } from "@/lib/types"
+import { assignRoles, getWinCondition, getRoleInfo } from "@/lib/game-logic"
+import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 
 interface GameStateHook {
   game: Game | null
@@ -17,9 +16,16 @@ interface GameStateHook {
   selectedCardDrawers: string[]
   currentCardDrawer: string | null
   deathsThisTurn: Player[]
+  deathLog: Player[]
+  bombTargets: string[]
+  playerNotes: Record<string, string[]>
   startGame: (players: Player[], settings: GameSettings) => void
   advancePhase: () => void
-  submitNightAction: (playerId: string, targetId: string | null, actionType: "KILL" | "PROTECT") => void
+  submitNightAction: (
+    playerId: string,
+    targetId: string | null,
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
+  ) => void
   submitVote: (voterId: string, targetId: string) => void
   resetGame: () => void
 }
@@ -35,9 +41,19 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [selectedCardDrawers, setSelectedCardDrawers] = useState<string[]>([])
   const [currentCardDrawer, setCurrentCardDrawer] = useState<string | null>(null)
   const [deathsThisTurn, setDeathsThisTurn] = useState<Player[]>([])
+  const [deathLog, setDeathLog] = useState<Player[]>([])
+  const [bombTargets, setBombTargets] = useState<string[]>([])
+  const [playerNotes, setPlayerNotes] = useState<Record<string, string[]>>({})
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
   const isGameOwner = currentPlayer?.isOwner || false
+
+  const addPlayerNote = useCallback((playerId: string, note: string) => {
+    setPlayerNotes((prev) => ({
+      ...prev,
+      [playerId]: [...(prev[playerId] || []), note],
+    }))
+  }, [])
 
   useEffect(() => {
     if (timeRemaining > 0) {
@@ -45,13 +61,18 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         setTimeRemaining((prev) => prev - 1)
       }, 1000)
       return () => clearTimeout(timer)
-    } else if (timeRemaining === 0 && currentPhase !== "LOBBY" && currentPhase !== "END") {
+    } else if (
+      timeRemaining === 0 &&
+      currentPhase !== "LOBBY" &&
+      currentPhase !== "END" &&
+      currentPhase !== "CARD_DRAWING"
+    ) {
       const phaseTimer = setTimeout(() => {
         advancePhase()
       }, 100)
       return () => clearTimeout(phaseTimer)
     }
-  }, [timeRemaining, currentPhase])
+  }, [timeRemaining, currentPhase, advancePhase])
 
   const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
     const playersWithRoles = assignRoles(gamePlayers, settings)
@@ -76,26 +97,225 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setSelectedCardDrawers([])
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
+    setDeathLog([])
+    setBombTargets([])
+    setPlayerNotes({})
   }, [])
 
   const processNightActions = useCallback(() => {
-    const killers = nightActions.filter((action) => action.actionType === "KILL")
-    const protectors = nightActions.filter((action) => action.actionType === "PROTECT")
+    const blockedPlayers = new Set<string>()
+    const guardianActions = nightActions
+      .filter((action) => {
+        const actor = players.find((p) => p.id === action.playerId)
+        return (
+          action.actionType === "PROTECT" &&
+          actor &&
+          ["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) &&
+          action.targetId
+        )
+      })
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
 
-    const protectedPlayers = new Set(protectors.map((action) => action.targetId).filter(Boolean))
-    const targetedPlayers = killers.map((action) => action.targetId).filter(Boolean)
+    guardianActions.forEach((action) => {
+      if (!blockedPlayers.has(action.playerId) && action.targetId) {
+        blockedPlayers.add(action.targetId)
+        addPlayerNote(action.targetId, `${currentTurn}. Gece: Gardiyan tarafından tutuldun`)
+      }
+    })
+
+    const killers = nightActions.filter(
+      (action) => action.actionType === "KILL" && !blockedPlayers.has(action.playerId),
+    )
+    const killTargets = killers.map((k) => k.targetId).filter(Boolean) as string[]
+    const bombPlacers = nightActions.filter(
+      (a) => a.actionType === "BOMB_PLANT" && !blockedPlayers.has(a.playerId),
+    )
+    const detonateAction = nightActions.find(
+      (a) => a.actionType === "BOMB_DETONATE" && !blockedPlayers.has(a.playerId),
+    )
+
+    let newBombTargets = [...bombTargets]
+    bombPlacers.forEach((a) => {
+      if (a.targetId && !newBombTargets.includes(a.targetId)) newBombTargets.push(a.targetId)
+    })
+
+    const protectedPlayers = new Set<string>()
+    const survivorActors = new Set<string>()
+    const revivedPlayers = new Set<string>()
+
+    let detonateIndex = -1
+
+    const updatedActions: NightAction[] = nightActions.map((action, idx) => {
+      const actor = players.find((p) => p.id === action.playerId)
+      const target = action.targetId ? players.find((p) => p.id === action.targetId) : null
+      let result: any = null
+
+      if (!actor) return { ...action }
+
+      if (blockedPlayers.has(actor.id)) {
+        return { ...action, result: { type: "BLOCKED" } }
+      }
+
+      if (action.actionType === "PROTECT" && actor.role !== "DELI") {
+        if (["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) && action.targetId) {
+          result = { type: "BLOCK" }
+        } else if (actor.role === "SURVIVOR") {
+          if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
+            protectedPlayers.add(actor.id)
+            survivorActors.add(actor.id)
+            const remaining = Math.max((actor.survivorShields || 0) - 1, 0)
+            result = { type: "PROTECT", remaining }
+          }
+        } else if (actor.role === "DOCTOR") {
+          if (target && (!target.isAlive || killTargets.includes(target.id))) {
+            revivedPlayers.add(target.id)
+            result = { type: "REVIVE", success: true }
+          } else {
+            result = { type: "REVIVE", success: false }
+          }
+        } else if (action.targetId) {
+          protectedPlayers.add(action.targetId)
+          result = { type: "PROTECT" }
+        }
+      }
+
+      if (action.actionType === "INVESTIGATE" && target) {
+        if (actor.role === "DELI") {
+          if (actor.displayRole === "WATCHER") {
+            const others = players.filter((p) => p.id !== target.id && p.id !== actor.id)
+            const randomVisitors = others
+              .sort(() => Math.random() - 0.5)
+              .slice(0, Math.min(2, others.length))
+              .map((p) => p.name)
+            result = { type: "WATCH", visitors: randomVisitors }
+          } else if (actor.displayRole === "DETECTIVE") {
+            const roles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
+            const fake = roles.sort(() => Math.random() - 0.5).slice(0, 2)
+            result = { type: "DETECT", roles: [fake[0], fake[1]] }
+          }
+        } else {
+          if (["WATCHER", "EVIL_WATCHER"].includes(actor.role!)) {
+            const visitors = nightActions
+              .filter(
+                (a) =>
+                  a.targetId === target.id &&
+                  a.playerId !== actor.id &&
+                  a.playerId !== target.id &&
+                  !blockedPlayers.has(a.playerId),
+              )
+              .map((a) => players.find((p) => p.id === a.playerId)?.name || "")
+              .filter(Boolean)
+            result = { type: "WATCH", visitors }
+          } else if (["DETECTIVE", "EVIL_DETECTIVE"].includes(actor.role!)) {
+            const roles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
+            const actualRole = target.role
+            const fakeRole = roles.filter((r) => r !== actualRole)[Math.floor(Math.random() * (roles.length - 1))]
+            const shown = [actualRole, fakeRole].sort(() => Math.random() - 0.5)
+            result = { type: "DETECT", roles: [shown[0], shown[1]] }
+          }
+        }
+      }
+
+      if (action.actionType === "BOMB_PLANT") {
+        result = { type: "BOMB_PLANT" }
+      } else if (action.actionType === "BOMB_DETONATE") {
+        detonateIndex = idx
+      }
+
+      if (result) {
+        const prefix = `${currentTurn}. Gece:`
+        let note = ""
+        switch (result.type) {
+          case "PROTECT":
+            if (actor.role === "SURVIVOR" && action.targetId === actor.id) {
+              note = `${prefix} Kendini korudun (${result.remaining} hak kaldı)`
+            } else if (target) {
+              note = `${prefix} ${target.name} oyuncusunu korudun`
+            }
+            break
+          case "BLOCK":
+            if (target) {
+              note = `${prefix} ${target.name} oyuncusunu tuttun`
+            }
+            break
+          case "REVIVE":
+            if (target) {
+              note = result.success
+                ? `${prefix} ${target.name} oyuncusunu dirilttin`
+                : `${prefix} ${target.name} oyuncusunu diriltmeyi denedin`
+            }
+            break
+          case "WATCH":
+            if (target) {
+              const visitorsText =
+                result.visitors && result.visitors.length > 0
+                  ? result.visitors.join(", ")
+                  : "kimse gelmedi"
+              note = `${prefix} ${target.name} oyuncusunu izledin: ${visitorsText}`
+            }
+            break
+          case "DETECT":
+            if (target) {
+              const r1 = getRoleInfo(result.roles[0]).name
+              const r2 = getRoleInfo(result.roles[1]).name
+              note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${r1}, ${r2}`
+            }
+            break
+          case "BOMB_PLANT":
+            if (target) {
+              note = `${prefix} ${target.name} oyuncusuna bomba yerleştirdin`
+            }
+            break
+        }
+        if (note) addPlayerNote(actor.id, note)
+      }
+
+      return { ...action, result }
+    })
+
+    let bombVictims: Player[] = []
+    if (detonateIndex !== -1) {
+      bombVictims = players.filter((p) => newBombTargets.includes(p.id) && p.isAlive)
+      const victimNames = bombVictims.map((p) => p.name)
+      updatedActions[detonateIndex] = {
+        ...updatedActions[detonateIndex],
+        result: { type: "BOMB_DETONATE", victims: victimNames },
+      }
+      const actorId = updatedActions[detonateIndex].playerId
+      const victimsText = victimNames.length > 0 ? victimNames.join(", ") : "kimse ölmedi"
+      addPlayerNote(actorId, `${currentTurn}. Gece: bombaları patlattın: ${victimsText}`)
+      newBombTargets = []
+    }
+
+    const targetedPlayers = killTargets
+    const bombVictimIds = bombVictims.map((p) => p.id)
 
     const newDeaths: Player[] = []
 
     setPlayers((prevPlayers) =>
       prevPlayers.map((player) => {
-        const updatedPlayer = { ...player, hasShield: false }
+        const updatedPlayer: Player = { ...player, hasShield: false }
 
         if (protectedPlayers.has(player.id)) {
           updatedPlayer.hasShield = true
         }
 
-        if (targetedPlayers.includes(player.id) && !protectedPlayers.has(player.id)) {
+        if (survivorActors.has(player.id)) {
+          updatedPlayer.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
+        }
+
+        if (revivedPlayers.has(player.id)) {
+          updatedPlayer.isAlive = true
+        }
+
+        if (bombVictimIds.includes(player.id) && !revivedPlayers.has(player.id)) {
+          updatedPlayer.isAlive = false
+          newDeaths.push(updatedPlayer)
+        } else if (
+          targetedPlayers.includes(player.id) &&
+          !protectedPlayers.has(player.id) &&
+          !revivedPlayers.has(player.id)
+        ) {
           updatedPlayer.isAlive = false
           newDeaths.push(updatedPlayer)
         }
@@ -104,10 +324,37 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       }),
     )
 
-    setDeathsThisTurn(newDeaths)
+    newBombTargets = newBombTargets.filter((id) => !newDeaths.some((p) => p.id === id))
+    setBombTargets(newBombTargets)
 
-    setNightActions([])
-  }, [nightActions])
+    // Add kill notes for attackers
+    nightActions
+      .filter((a) => a.actionType === "KILL")
+      .forEach((action) => {
+        const actor = players.find((p) => p.id === action.playerId)
+        const target = players.find((p) => p.id === action.targetId)
+        if (actor && target) {
+          const killed = newDeaths.some((d) => d.id === target.id)
+          const note = `${currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? " ve öldürdün" : ""}`
+          addPlayerNote(actor.id, note)
+        }
+      })
+
+    // Add notes for players without actions
+    const actedIds = new Set(nightActions.map((a) => a.playerId))
+    players.forEach((p) => {
+      if (p.isAlive && !actedIds.has(p.id)) {
+        addPlayerNote(p.id, `${currentTurn}. Gece: hiçbir şey yapmadın`)
+      }
+    })
+
+    setNightActions(updatedActions)
+
+    setDeathsThisTurn(newDeaths)
+    if (newDeaths.length > 0) {
+      setDeathLog((prev) => [...prev, ...newDeaths])
+    }
+  }, [nightActions, players, bombTargets, currentTurn, addPlayerNote])
 
   const processVotes = useCallback(() => {
     const voteCount: Record<string, number> = {}
@@ -123,12 +370,18 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     let maxVotes = 0
     let eliminatedPlayerId: string | null = null
 
-    Object.entries(voteCount).forEach(([playerId, count]) => {
+    const entries = Object.entries(voteCount)
+    entries.forEach(([playerId, count]) => {
       if (count > maxVotes) {
         maxVotes = count
         eliminatedPlayerId = playerId
       }
     })
+
+    const topPlayers = entries.filter(([, count]) => count === maxVotes)
+    if (topPlayers.length > 1) {
+      eliminatedPlayerId = null
+    }
 
     const newDeaths: Player[] = []
 
@@ -144,28 +397,13 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         }),
       )
 
-      const eliminatedPlayer = players.find((p) => p.id === eliminatedPlayerId)
-      if (eliminatedPlayer?.role === "BOMBER") {
-        const randomVictims = alivePlayers
-          .filter((p) => p.id !== eliminatedPlayerId)
-          .sort(() => Math.random() - 0.5)
-          .slice(0, 2)
-
-        setPlayers((prevPlayers) =>
-          prevPlayers.map((player) => {
-            if (randomVictims.some((victim) => victim.id === player.id)) {
-              const deadPlayer = { ...player, isAlive: false }
-              newDeaths.push(deadPlayer)
-              return deadPlayer
-            }
-            return player
-          }),
-        )
-      }
+      // Bomber no longer causes extra deaths upon elimination
     }
 
-    setDeathsThisTurn((prev) => [...prev, ...newDeaths])
-    setVotes({})
+    setDeathsThisTurn(newDeaths)
+    if (newDeaths.length > 0) {
+      setDeathLog((prev) => [...prev, ...newDeaths])
+    }
   }, [votes, players])
 
   const advancePhase = useCallback(() => {
@@ -181,7 +419,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     switch (currentPhase) {
       case "ROLE_REVEAL":
         setCurrentPhase("NIGHT")
-        setTimeRemaining(15)
+        setTimeRemaining(game?.settings.nightDuration || 15)
         break
 
       case "NIGHT":
@@ -191,28 +429,36 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         break
 
       case "NIGHT_RESULTS":
+        setPlayers((prev) => prev.map((p) => ({ ...p, hasShield: false })))
         setCurrentPhase("DEATH_ANNOUNCEMENT")
         setTimeRemaining(5)
+        setNightActions([])
         break
 
       case "DEATH_ANNOUNCEMENT":
         const alivePlayers = players.filter((p) => p.isAlive)
         const shuffled = [...alivePlayers].sort(() => Math.random() - 0.5)
-        const cardDrawers = shuffled.slice(0, Math.min(2, alivePlayers.length))
+        const drawCount = game?.settings.cardDrawCount || 0
+        const cardDrawers = shuffled.slice(0, Math.min(drawCount, alivePlayers.length))
         setSelectedCardDrawers(cardDrawers.map((p) => p.id))
         setCurrentCardDrawer(cardDrawers[0]?.id || null)
-        setCurrentPhase("CARD_DRAWING")
-        setTimeRemaining(10)
+        if (cardDrawers.length > 0) {
+          setCurrentPhase("CARD_DRAWING")
+          setTimeRemaining(0)
+        } else {
+          setCurrentPhase("DAY_DISCUSSION")
+          setTimeRemaining(game?.settings.dayDuration || 15)
+        }
         break
 
       case "CARD_DRAWING":
         const currentIndex = selectedCardDrawers.indexOf(currentCardDrawer || "")
         if (currentIndex < selectedCardDrawers.length - 1) {
           setCurrentCardDrawer(selectedCardDrawers[currentIndex + 1])
-          setTimeRemaining(10)
+          setTimeRemaining(0)
         } else {
           setCurrentPhase("DAY_DISCUSSION")
-          setTimeRemaining(15)
+          setTimeRemaining(game?.settings.dayDuration || 15)
           setSelectedCardDrawers([])
           setCurrentCardDrawer(null)
         }
@@ -220,7 +466,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
       case "DAY_DISCUSSION":
         setCurrentPhase("VOTE")
-        setTimeRemaining(15)
+        setTimeRemaining(game?.settings.voteDuration || 15)
         break
 
       case "VOTE":
@@ -240,8 +486,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         } else {
           setCurrentTurn((prev) => prev + 1)
           setCurrentPhase("NIGHT")
-          setTimeRemaining(15)
+          setTimeRemaining(game?.settings.nightDuration || 15)
           setDeathsThisTurn([])
+          setVotes({})
         }
         break
 
@@ -250,16 +497,26 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }
   }, [currentPhase, game, players, processNightActions, processVotes, selectedCardDrawers, currentCardDrawer])
 
-  const submitNightAction = useCallback((playerId: string, targetId: string | null, actionType: "KILL" | "PROTECT") => {
-    const newAction: NightAction = {
-      playerId,
-      targetId,
-      actionType,
-      timestamp: new Date(),
-    }
+  const submitNightAction = useCallback(
+    (
+      playerId: string,
+      targetId: string | null,
+      actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
+    ) => {
+      const actor = players.find((p) => p.id === playerId)
+      if (!actor || !actor.isAlive) return
 
-    setNightActions((prev) => [...prev.filter((action) => action.playerId !== playerId), newAction])
-  }, [])
+      const newAction: NightAction = {
+        playerId,
+        targetId,
+        actionType,
+        timestamp: new Date(),
+      }
+
+      setNightActions((prev) => [...prev.filter((action) => action.playerId !== playerId), newAction])
+    },
+    [players],
+  )
 
   const submitVote = useCallback(
     (voterId: string, targetId: string) => {
@@ -269,10 +526,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         return
       }
 
-      setVotes((prev) => ({
-        ...prev,
-        [voterId]: targetId,
-      }))
+      setVotes((prev) => {
+        const newVotes = { ...prev, [voterId]: targetId }
+        const aliveCount = players.filter((p) => p.isAlive).length
+        if (Object.keys(newVotes).length >= aliveCount) {
+          setTimeRemaining(0)
+        }
+        return newVotes
+      })
     },
     [players],
   )
@@ -288,76 +549,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setSelectedCardDrawers([])
     setCurrentCardDrawer(null)
     setDeathsThisTurn([])
+    setDeathLog([])
+    setBombTargets([])
   }, [])
 
-  useEffect(() => {
-    if (currentPhase === "NIGHT") {
-      const botPlayers = players.filter((p) => p.isBot && p.isAlive && p.role)
-
-      botPlayers.forEach((bot) => {
-        const hasAction = nightActions.some((action) => action.playerId === bot.id)
-        if (!hasAction) {
-          const delay = Math.random() * 2000 + 1000 // 1-3 seconds delay
-          setTimeout(() => {
-            BotBehavior.simulateNightAction(bot, players).then((targetId) => {
-              if (targetId && bot.role) {
-                let actionType: "KILL" | "PROTECT" = "KILL"
-                if (bot.role.id === "doctor") actionType = "PROTECT"
-
-                submitNightAction(bot.id, targetId, actionType)
-                console.log(
-                  `[v0] Bot ${bot.name} performed ${actionType} on ${players.find((p) => p.id === targetId)?.name}`,
-                )
-              }
-            })
-          }, delay)
-        }
-      })
-    }
-  }, [currentPhase, players, nightActions, submitNightAction])
-
-  useEffect(() => {
-    if (currentPhase === "VOTE") {
-      const botPlayers = players.filter((p) => p.isBot && p.isAlive)
-
-      botPlayers.forEach((bot) => {
-        if (!votes[bot.id]) {
-          const delay = Math.random() * 3000 + 1000 // 1-4 seconds delay
-          setTimeout(() => {
-            // Double check bot hasn't voted yet to prevent race conditions
-            setVotes((currentVotes) => {
-              if (currentVotes[bot.id]) {
-                return currentVotes // Bot already voted, don't vote again
-              }
-
-              BotBehavior.simulateVote(bot, players).then((targetId) => {
-                if (targetId) {
-                  submitVote(bot.id, targetId)
-                  console.log(`[v0] Bot ${bot.name} voted for ${players.find((p) => p.id === targetId)?.name}`)
-                }
-              })
-
-              return currentVotes
-            })
-          }, delay)
-        }
-      })
-    }
-  }, [currentPhase, players]) // Removed votes from dependency array to prevent infinite loops
-
-  useEffect(() => {
-    if (currentPhase === "CARD_DRAWING" && currentCardDrawer) {
-      const currentDrawer = players.find((p) => p.id === currentCardDrawer)
-
-      if (currentDrawer?.isBot) {
-        const delay = Math.random() * 3000 + 2000 // 2-5 seconds
-        setTimeout(() => {
-          console.log(`[v0] Bot ${currentDrawer.name} automatically drew a card`)
-          advancePhase()
-        }, delay)
-      }
-    }
-  }, [currentPhase, currentCardDrawer, players, advancePhase])
+  // Bot simulation removed for realtime play
 
   return {
     game,
@@ -371,6 +567,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     selectedCardDrawers,
     currentCardDrawer,
     deathsThisTurn,
+    deathLog,
+    bombTargets,
+    playerNotes,
     startGame,
     advancePhase,
     submitNightAction,

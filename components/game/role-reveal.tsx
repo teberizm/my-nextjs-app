@@ -17,7 +17,7 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
   const [isRevealed, setIsRevealed] = useState(false)
   const [timeLeft, setTimeLeft] = useState(10)
 
-  const roleInfo = getRoleInfo(player.role!)
+  const roleInfo = getRoleInfo(player.displayRole || player.role!)
 
   useEffect(() => {
     if (isRevealed && timeLeft > 0) {
