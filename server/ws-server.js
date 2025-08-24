@@ -1,3 +1,4 @@
+// ws-server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -7,19 +8,17 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 // In-memory room and player tracking
-const rooms = new Map(); // roomId -> { players: Map<playerId, player>, sockets: Set<ws> }
+// roomId -> { players: Map<playerId, player>, sockets: Set<ws> }
+const rooms = new Map();
 
-function broadcastPlayerList(roomId, options = {}) {
+/* -------------------- Helpers -------------------- */
+function broadcastToRoom(roomId, dataObj) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const players = Array.from(room.players.values());
   const message = JSON.stringify({
-    type: 'PLAYER_LIST_UPDATED',
-    payload: {
-      players,
-      ...(options.newPlayer ? { newPlayer: options.newPlayer } : {}),
-      ...(options.removedPlayer ? { removedPlayer: options.removedPlayer } : {}),
-    },
+    ...dataObj,
+    // odada yayınladığımız tüm mesajlara roomId'yi ekleyelim
+    roomId,
   });
   room.sockets.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
@@ -28,70 +27,131 @@ function broadcastPlayerList(roomId, options = {}) {
   });
 }
 
+function broadcastPlayerList(roomId, options = {}) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const players = Array.from(room.players.values());
+  broadcastToRoom(roomId, {
+    type: 'PLAYER_LIST_UPDATED',
+    payload: {
+      players,
+      ...(options.newPlayer ? { newPlayer: options.newPlayer } : {}),
+      ...(options.removedPlayer ? { removedPlayer: options.removedPlayer } : {}),
+    },
+  });
+}
+
+/* -------------------- Connection -------------------- */
 wss.on('connection', function connection(ws) {
+  // Heartbeat işaretleyicisi
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   ws.on('message', function incoming(message) {
     let data;
     try {
       data = JSON.parse(message);
     } catch (e) {
-      console.error('Invalid message', e);
+      console.error('Invalid message (not JSON):', e);
       return;
     }
 
-    const { type, payload, roomId, playerId } = data;
+    const { type, payload, roomId, playerId } = data || {};
+    // Gelen roomId yoksa ws.roomId'yi kullanacağız (JOIN sonrası dolu olur)
+    const effectiveRoomId = roomId || ws.roomId;
 
     switch (type) {
       case 'JOIN_ROOM': {
-        const { roomId: joinRoomId, player } = payload;
+        const { roomId: joinRoomId, player } = payload || {};
+        if (!joinRoomId || !player || !player.id) {
+          ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
+          return;
+        }
+
         ws.roomId = joinRoomId;
         ws.playerId = player.id;
+
         if (!rooms.has(joinRoomId)) {
           rooms.set(joinRoomId, { players: new Map(), sockets: new Set() });
         }
+
         const room = rooms.get(joinRoomId);
         room.players.set(player.id, player);
         room.sockets.add(ws);
 
-        ws.send(
-          JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }),
-        );
+        ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
 
         broadcastPlayerList(joinRoomId, { newPlayer: player });
         break;
       }
 
       case 'KICK_PLAYER': {
-        const room = rooms.get(roomId);
+        if (!effectiveRoomId) return;
+        const room = rooms.get(effectiveRoomId);
         if (!room) return;
-        const targetId = payload.playerId;
+
+        const targetId = payload && payload.playerId;
+        if (!targetId) return;
+
         const removed = room.players.get(targetId);
         const targetSocket = Array.from(room.sockets).find((s) => s.playerId === targetId);
+
         if (targetSocket) {
-          targetSocket.send(
-            JSON.stringify({ type: 'PLAYER_KICKED', payload: { playerId: targetId } }),
-          );
-          targetSocket.close();
+          targetSocket.send(JSON.stringify({ type: 'PLAYER_KICKED', payload: { playerId: targetId } }));
+          // Bağlantıyı kapat
+          try { targetSocket.close(); } catch (_) {}
         }
+
         room.players.delete(targetId);
-        broadcastPlayerList(roomId, { removedPlayer: removed });
+        broadcastPlayerList(effectiveRoomId, { removedPlayer: removed });
         break;
       }
 
       case 'GAME_STARTED': {
-        const room = rooms.get(roomId);
-        if (!room) return;
-        const message = JSON.stringify({ type: 'GAME_STARTED', payload });
-        room.sockets.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
-            client.send(message);
-          }
+        if (!effectiveRoomId) return;
+        // Tüm odaya aynen yayınla
+        broadcastToRoom(effectiveRoomId, {
+          type: 'GAME_STARTED',
+          payload, // { players, settings, initiatorId }
         });
         break;
       }
 
-      default:
-        // Unknown events are ignored
+      case 'PHASE_CHANGED': {
+        if (!effectiveRoomId) return;
+        // Faz değişimi yayını (initiatorId, turn vb. olabilir)
+        broadcastToRoom(effectiveRoomId, {
+          type: 'PHASE_CHANGED',
+          payload,
+        });
         break;
+      }
+
+      case 'VOTE_CAST': {
+        if (!effectiveRoomId) return;
+        // Oy güncellemesi yayını (votes objesi)
+        broadcastToRoom(effectiveRoomId, {
+          type: 'VOTE_CAST',
+          payload,
+        });
+        break;
+      }
+
+      case 'NIGHT_ACTION_UPDATED': {
+        if (!effectiveRoomId) return;
+        // Gece aksiyonları yayını (nightActions array)
+        broadcastToRoom(effectiveRoomId, {
+          type: 'NIGHT_ACTION_UPDATED',
+          payload,
+        });
+        break;
+      }
+
+      default: {
+        // Unknown events are ignored
+        // Dilersen loglayabilirsin: console.log('Unknown type:', type)
+        break;
+      }
     }
   });
 
@@ -100,19 +160,42 @@ wss.on('connection', function connection(ws) {
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
       const removed = room.players.get(playerId);
+
       room.players.delete(playerId);
       room.sockets.delete(ws);
+
       broadcastPlayerList(roomId, { removedPlayer: removed });
+
       if (room.players.size === 0) {
         rooms.delete(roomId);
       }
     }
   });
+
+  ws.on('error', (err) => {
+    console.error('WS error:', err && err.message ? err.message : err);
+  });
 });
 
+/* -------------------- Heartbeat (opsiyonel ama önerilir) -------------------- */
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      try { ws.terminate(); } catch (_) {}
+      return;
+    }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (_) {}
+  });
+}, 30000);
+
+wss.on('close', function close() {
+  clearInterval(interval);
+});
+
+/* -------------------- HTTP -------------------- */
 app.get('/', (req, res) => res.send('Socket server OK'));
 
 server.listen(3001, '0.0.0.0', () => {
   console.log('✅ WebSocket sunucu çalışıyor http://0.0.0.0:3001');
 });
-
