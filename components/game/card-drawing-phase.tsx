@@ -8,7 +8,6 @@ interface CardDrawingPhaseProps {
   selectedCardDrawers: string[]
   currentCardDrawer: string | null
   currentPlayerId: string
-  timeRemaining: number
   onCardDrawn: () => void
 }
 
@@ -17,7 +16,6 @@ export function CardDrawingPhase({
   selectedCardDrawers,
   currentCardDrawer,
   currentPlayerId,
-  timeRemaining,
   onCardDrawn,
 }: CardDrawingPhaseProps) {
   const [isScanning, setIsScanning] = useState(false)
@@ -44,7 +42,6 @@ export function CardDrawingPhase({
       <div className="max-w-2xl w-full text-center space-y-8">
         <div className="space-y-4">
           <h1 className="text-4xl font-bold text-white mb-2">🎴 Kart Çekme Zamanı</h1>
-          <div className="text-cyan-400 text-lg">Süre: {timeRemaining}s</div>
         </div>
 
         <div className="bg-slate-800/50 backdrop-blur-sm border border-purple-500/30 rounded-xl p-8 shadow-2xl">
