@@ -69,7 +69,7 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
   }
   const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
 
-  const handleSubmitAction = () => {
+  function handleSubmitAction() {
     if (visibleRole === "BOMBER") {
       onSubmitAction(selectedTarget, "BOMB_PLANT")
       setActionSubmitted(true)

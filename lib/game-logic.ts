@@ -35,14 +35,12 @@ export function assignRoles(players: Player[], settings: GameSettings): Player[]
 
   const specialCount = Math.min(settings.specialRoleCount, players.length)
   for (let i = 0; i < specialCount; i++) {
-    const role = specialRoles[Math.floor(Math.random() * specialRoles.length)]
-    roles.push(role)
+    roles.push(specialRoles[Math.floor(Math.random() * specialRoles.length)])
   }
 
   const allInnocentRoles = [...innocentOnlyRoles, ...convertibleRoles]
   while (roles.length < players.length) {
-    const role = allInnocentRoles[Math.floor(Math.random() * allInnocentRoles.length)]
-    roles.push(role)
+    roles.push(allInnocentRoles[Math.floor(Math.random() * allInnocentRoles.length)])
   }
 
   // Convert some roles to traitor variants (never Deli)
