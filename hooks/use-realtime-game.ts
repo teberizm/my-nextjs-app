@@ -22,7 +22,7 @@ interface GameNotification {
   autoHide?: boolean
 }
 
-export function useRealtimeGame(roomId: string, playerId: string) {
+export function useRealtimeGame(roomId: string, player: Player) {
   const [gameState, setGameState] = useState<RealtimeGameState>({
     connected: false,
     room: null,
@@ -303,41 +303,12 @@ export function useRealtimeGame(roomId: string, playerId: string) {
 
   // Connect to room on mount
   useEffect(() => {
-    wsClient.connect(roomId, playerId)
+    wsClient.connect(roomId, player)
 
     return () => {
       wsClient.disconnect()
     }
-  }, [roomId, playerId])
-
-  // Simulate some events for demo purposes
-  useEffect(() => {
-    if (gameState.connected) {
-      // Simulate other players joining
-      setTimeout(() => {
-        wsClient.simulateEvent("PLAYER_LIST_UPDATED", {
-          players: [
-            { id: playerId, name: "You", isOwner: true, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player2", name: "Alice", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player3", name: "Bob", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-          ],
-          newPlayer: { name: "Alice" },
-        })
-      }, 2000)
-
-      setTimeout(() => {
-        wsClient.simulateEvent("PLAYER_LIST_UPDATED", {
-          players: [
-            { id: playerId, name: "You", isOwner: true, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player2", name: "Alice", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player3", name: "Bob", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-            { id: "player4", name: "Charlie", isOwner: false, isAlive: true, isMuted: false, hasShield: false },
-          ],
-          newPlayer: { name: "Bob" },
-        })
-      }, 4000)
-    }
-  }, [gameState.connected, playerId])
+  }, [roomId, player])
 
   const sendEvent = useCallback((eventType: GameEvent, payload: any) => {
     wsClient.sendEvent(eventType, payload)

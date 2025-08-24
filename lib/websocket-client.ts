@@ -1,6 +1,7 @@
 "use client"
 
 import { EventEmitter } from "events"
+import type { Player } from "./types"
 
 export type GameEvent =
   | "ROOM_JOINED"
@@ -20,6 +21,8 @@ export type GameEvent =
   | "GAME_ENDED"
   | "CONNECTION_STATUS"
   | "ERROR"
+  | "PLAYER_KICKED"
+  | "KICK_PLAYER"
 
 export interface GameEventData {
   type: GameEvent
@@ -30,101 +33,60 @@ export interface GameEventData {
   playerId?: string
 }
 
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001"
+
 export class WebSocketClient extends EventEmitter {
-  private connected = false
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectInterval = 3000
+  private socket: WebSocket | null = null
   private roomId: string | null = null
-  private playerId: string | null = null
+  private player: Player | null = null
 
-  constructor() {
-    super()
-    this.simulateConnection()
-  }
-
-  private simulateConnection() {
-    // Simulate WebSocket connection
-    setTimeout(() => {
-      this.connected = true
-      this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() })
-    }, 1000)
-  }
-
-  connect(roomId: string, playerId: string) {
+  connect(roomId: string, player: Player) {
     this.roomId = roomId
-    this.playerId = playerId
+    this.player = player
+    this.socket = new WebSocket(WS_URL)
 
-    if (!this.connected) {
-      this.simulateConnection()
+    this.socket.onopen = () => {
+      this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() })
+      this.sendEvent("JOIN_ROOM" as GameEvent, { roomId, player })
     }
 
-    // Simulate joining room
-    setTimeout(() => {
-      this.emit("ROOM_JOINED", {
-        type: "ROOM_JOINED",
-        payload: { roomId, playerId },
-        timestamp: new Date(),
-        roomId,
-        playerId,
-      })
-    }, 500)
+    this.socket.onclose = () => {
+      this.emit("CONNECTION_STATUS", { connected: false, timestamp: new Date() })
+    }
+
+    this.socket.onmessage = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data as string)
+        this.emit(data.type, { ...data, timestamp: new Date() })
+      } catch (e) {
+        console.error("Invalid message", e)
+      }
+    }
   }
 
   disconnect() {
-    this.connected = false
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.close()
+    }
+    this.socket = null
     this.roomId = null
-    this.playerId = null
-    this.emit("CONNECTION_STATUS", { connected: false, timestamp: new Date() })
+    this.player = null
   }
 
   sendEvent(eventType: GameEvent, payload: any) {
-    if (!this.connected) {
-      this.emit("ERROR", { message: "Not connected to server" })
-      return
-    }
-
-    // Simulate server processing and broadcasting
-    setTimeout(
-      () => {
-        this.emit(eventType, {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(
+        JSON.stringify({
           type: eventType,
           payload,
-          timestamp: new Date(),
           roomId: this.roomId,
-          playerId: this.playerId,
-        })
-      },
-      100 + Math.random() * 200,
-    ) // Simulate network latency
-  }
-
-  // Simulate receiving events from other players
-  simulateEvent(eventType: GameEvent, payload: any, fromPlayerId?: string) {
-    if (!this.connected) return
-
-    this.emit(eventType, {
-      type: eventType,
-      payload,
-      timestamp: new Date(),
-      roomId: this.roomId,
-      playerId: fromPlayerId || "other_player",
-    })
-  }
-
-  isConnected(): boolean {
-    return this.connected
-  }
-
-  getConnectionStatus() {
-    return {
-      connected: this.connected,
-      roomId: this.roomId,
-      playerId: this.playerId,
-      reconnectAttempts: this.reconnectAttempts,
+          playerId: this.player?.id,
+        }),
+      )
+    } else {
+      this.emit("ERROR", { message: "Not connected to server" })
     }
   }
 }
 
-// Singleton instance
 export const wsClient = new WebSocketClient()

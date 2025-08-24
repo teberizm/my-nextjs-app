@@ -1,10 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { RoomLobby } from "@/components/room/room-lobby"
 import { GameController } from "@/components/game/game-controller"
-import { RealtimeWrapper } from "@/components/realtime/realtime-wrapper"
 import { JoinRoomDialog } from "@/components/room/join-room-dialog"
+import { wsClient } from "@/lib/websocket-client"
+import { useRealtimeGame } from "@/hooks/use-realtime-game"
 import type { Room, Player, GameSettings, GamePhase } from "@/lib/types"
 
 const ROOM_PASSWORD = "1234"
@@ -56,18 +57,13 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
 
   const handleStartGame = () => {
     if (gamePhase === "LOBBY") {
+      wsClient.sendEvent("GAME_STARTED", {})
       setGamePhase("ROLE_REVEAL")
     }
   }
 
   const handleKickPlayer = (playerId: string) => {
-    setCurrentRoom((prev) => ({
-      ...prev,
-      players: prev.players.filter((p) => p.id !== playerId),
-    }))
-    if (currentPlayer?.id === playerId) {
-      setCurrentPlayer(null)
-    }
+    wsClient.sendEvent("KICK_PLAYER", { playerId })
   }
 
   const handleToggleLock = () => {
@@ -90,15 +86,36 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     }))
   }
 
+  const realtime = currentPlayer ? useRealtimeGame(currentRoom.id, currentPlayer) : null
+
+  useEffect(() => {
+    const handleKicked = (data: any) => {
+      if (data.payload.playerId === currentPlayer?.id) {
+        setCurrentPlayer(null)
+      }
+    }
+    wsClient.on("PLAYER_KICKED", handleKicked)
+    const handlePlayerList = (data: any) => {
+      setCurrentRoom((prev) => ({ ...prev, players: data.payload.players }))
+    }
+    wsClient.on("PLAYER_LIST_UPDATED", handlePlayerList)
+    return () => {
+      wsClient.off("PLAYER_KICKED", handleKicked)
+      wsClient.off("PLAYER_LIST_UPDATED", handlePlayerList)
+    }
+  }, [currentPlayer])
+
   if (!currentPlayer) {
     return <JoinRoomDialog onJoin={handleJoin} />
   }
 
+  const roomWithPlayers = { ...currentRoom, players: realtime?.players || currentRoom.players }
+
   return (
-    <RealtimeWrapper roomId={currentRoom.id} playerId={currentPlayer.id}>
+    <>
       {gamePhase === "LOBBY" ? (
         <RoomLobby
-          room={currentRoom}
+          room={roomWithPlayers}
           currentPlayer={currentPlayer}
           gameSettings={gameSettings}
           onStartGame={handleStartGame}
@@ -108,12 +125,12 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         />
       ) : (
         <GameController
-          initialPlayers={currentRoom.players}
+          initialPlayers={roomWithPlayers.players}
           gameSettings={gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
         />
       )}
-    </RealtimeWrapper>
+    </>
   )
 }
