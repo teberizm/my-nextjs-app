@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { assignRoles, getWinCondition, getRoleInfo } from "@/lib/game-logic"
+import { assignRoles, getRoleInfo } from "@/lib/game-logic"
 import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 
 interface GameStateHook {
@@ -28,6 +28,31 @@ interface GameStateHook {
   ) => void
   submitVote: (voterId: string, targetId: string) => void
   resetGame: () => void
+}
+
+function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
+  const alivePlayers = players.filter((p) => p.isAlive)
+  const aliveTraitors = alivePlayers.filter((p) =>
+    ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role!),
+  )
+  const aliveBombers = alivePlayers.filter((p) => p.role === "BOMBER")
+  const aliveNonTraitors = alivePlayers.filter(
+    (p) => !["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role!) && p.role !== "BOMBER",
+  )
+
+  if (aliveBombers.length > 0 && alivePlayers.length - aliveBombers.length <= 1) {
+    return { winner: "BOMBER", gameEnded: true }
+  }
+
+  if (aliveBombers.length === 0 && aliveTraitors.length >= aliveNonTraitors.length && aliveTraitors.length > 0) {
+    return { winner: "TRAITORS", gameEnded: true }
+  }
+
+  if (aliveBombers.length === 0 && aliveTraitors.length === 0) {
+    return { winner: "INNOCENTS", gameEnded: true }
+  }
+
+  return { winner: null, gameEnded: false }
 }
 
 export function useGameState(currentPlayerId: string): GameStateHook {
@@ -558,6 +583,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setBombTargets([])
   }, [])
 
+  const handlePhaseTimeout = useCallback(() => {
+    advancePhase()
+  }, [advancePhase])
+
   useEffect(() => {
     if (timeRemaining > 0) {
       const timer = setTimeout(() => {
@@ -571,11 +600,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       currentPhase !== "CARD_DRAWING"
     ) {
       const phaseTimer = setTimeout(() => {
-        advancePhase()
+        handlePhaseTimeout()
       }, 100)
       return () => clearTimeout(phaseTimer)
     }
-  }, [timeRemaining, currentPhase, advancePhase])
+  }, [timeRemaining, currentPhase, handlePhaseTimeout])
 
   // Bot simulation removed for realtime play
 
