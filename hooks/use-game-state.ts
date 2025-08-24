@@ -583,6 +583,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setBombTargets([])
   }, [])
 
+  const handlePhaseTimeout = useCallback(() => {
+    advancePhase()
+  }, [advancePhase])
+
   useEffect(() => {
     if (timeRemaining > 0) {
       const timer = setTimeout(() => {
@@ -596,11 +600,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       currentPhase !== "CARD_DRAWING"
     ) {
       const phaseTimer = setTimeout(() => {
-        advancePhase()
+        handlePhaseTimeout()
       }, 100)
       return () => clearTimeout(phaseTimer)
     }
-  }, [timeRemaining, currentPhase, advancePhase])
+  }, [timeRemaining, currentPhase, handlePhaseTimeout])
 
   // Bot simulation removed for realtime play
 
