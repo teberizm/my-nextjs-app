@@ -89,6 +89,10 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   const realtime = useRealtimeGame(currentRoom.id, currentPlayer)
 
   useEffect(() => {
+    setGamePhase(realtime.currentPhase)
+  }, [realtime.currentPhase])
+
+  useEffect(() => {
     const handleKicked = (data: any) => {
       if (data.payload.playerId === currentPlayer?.id) {
         setCurrentPlayer(null)
