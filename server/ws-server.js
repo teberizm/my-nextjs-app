@@ -77,6 +77,18 @@ wss.on('connection', function connection(ws) {
         break;
       }
 
+      case 'GAME_STARTED': {
+        const room = rooms.get(roomId);
+        if (!room) return;
+        const message = JSON.stringify({ type: 'GAME_STARTED', payload });
+        room.sockets.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
+        break;
+      }
+
       default:
         // Unknown events are ignored
         break;
