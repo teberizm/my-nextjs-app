@@ -149,6 +149,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           players={players}
           votes={votes}
           deaths={deathsThisTurn}
+          deathLog={deathLog}
           timeRemaining={timeRemaining}
         />
       )
