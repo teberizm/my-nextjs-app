@@ -8,6 +8,13 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select"
 import { Users, Crown, Copy, QrCode, Settings, Play, UserX, Lock, Unlock, Share2 } from "lucide-react"
 import type { Room, Player, GameSettings } from "@/lib/types"
 
