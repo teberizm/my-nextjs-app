@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import dynamic from "next/dynamic"
 import { RoomLobby } from "@/components/room/room-lobby"
 import { GameController } from "@/components/game/game-controller"
 import { JoinRoomDialog } from "@/components/room/join-room-dialog"
@@ -9,9 +8,6 @@ import { wsClient } from "@/lib/websocket-client"
 import { useRealtimeGame } from "@/hooks/use-realtime-game"
 import type { Room, Player, GameSettings, GamePhase } from "@/lib/types"
 
-const LeafletMap = dynamic(() => import("@/components/leaflet-map"), {
-  ssr: false,
-})
 
 const ROOM_PASSWORD = "1234"
 
@@ -139,7 +135,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           onGameEnd={handleGameEnd}
         />
       )}
-      <LeafletMap />
     </>
   )
 }
