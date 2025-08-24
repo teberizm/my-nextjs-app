@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { assignRoles, getRoleInfo } from "@/lib/game-logic"
 import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
-
+import { wsClient } from "@/lib/websocket-client"
 interface GameStateHook {
   game: Game | null
   players: Player[]
@@ -56,6 +56,16 @@ function getWinCondition(players: Player[]): { winner: string | null; gameEnded:
 }
 
 export function useGameState(currentPlayerId: string): GameStateHook {
+  useEffect(() => {
+    const handler = (data: any) => {
+      const { players, settings } = data.payload
+      startGame(players, settings)
+    }
+    wsClient.on("GAME_STARTED", handler)
+    return () => {
+      wsClient.off("GAME_STARTED", handler)
+    }
+  }, [startGame])
   const [game, setGame] = useState<Game | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [currentPhase, setCurrentPhase] = useState<GamePhase>("LOBBY")
