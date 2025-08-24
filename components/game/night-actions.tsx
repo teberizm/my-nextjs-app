@@ -35,6 +35,29 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
   const survivorShields = currentPlayer.survivorShields || 0
   const isSurvivorWithoutShields = visibleRole === "SURVIVOR" && survivorShields <= 0
   const notes = playerNotes[currentPlayer.id] || []
+  const renderGeneralNotes = () => (
+    <Card className="bg-destructive/10 border-destructive/30 mb-6">
+      <CardHeader>
+        <CardTitle className="text-destructive font-work-sans">Genel Notlar</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {deaths.length > 0 ? (
+          <div className="space-y-2">
+            {deaths.map((player, idx) => (
+              <div key={player.id} className="flex items-center gap-2">
+                <Badge variant="destructive" className="text-xs">
+                  {idx + 1}.
+                </Badge>
+                <span className="font-medium">{player.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Henüz kimse ölmedi</p>
+        )}
+      </CardContent>
+    </Card>
+  )
   let alivePlayers = allPlayers.filter((p) => {
     if (!p.isAlive || p.id === currentPlayer.id) return false
     // Traitors cannot target other traitors
@@ -117,58 +140,67 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
 
   if (!currentPlayer.isAlive) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="max-w-md w-full neon-border bg-card/50 backdrop-blur-sm">
-          <CardHeader className="text-center">
-            <div className="w-16 h-16 bg-gray-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Skull className="w-8 h-8 text-gray-400" />
-            </div>
-            <CardTitle className="font-work-sans">Öldün</CardTitle>
-            <CardDescription>Artık aksiyon yapamazsın</CardDescription>
-          </CardHeader>
-        </Card>
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-md mx-auto space-y-6">
+          <Card className="neon-border bg-card/50 backdrop-blur-sm">
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-gray-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Skull className="w-8 h-8 text-gray-400" />
+              </div>
+              <CardTitle className="font-work-sans">Öldün</CardTitle>
+              <CardDescription>Artık aksiyon yapamazsın</CardDescription>
+            </CardHeader>
+          </Card>
+          {renderGeneralNotes()}
+        </div>
       </div>
     )
   }
 
   if (!roleInfo.nightAction || isSurvivorWithoutShields) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="max-w-md w-full neon-border bg-card/50 backdrop-blur-sm">
-          <CardHeader className="text-center">
-            <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Moon className="w-8 h-8 text-primary" />
-            </div>
-            <CardTitle className="font-work-sans">Gece Vakti</CardTitle>
-            <CardDescription>Diğer oyuncuların aksiyonlarını bekle</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-muted-foreground">Bu gece herhangi bir aksiyon yapman gerekmiyor. Rahatla ve bekle.</p>
-            <div className="text-2xl font-bold text-primary">{timeRemaining}s</div>
-            <Badge variant="secondary">Bekleniyor...</Badge>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-md mx-auto space-y-6">
+          <Card className="neon-border bg-card/50 backdrop-blur-sm">
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Moon className="w-8 h-8 text-primary" />
+              </div>
+              <CardTitle className="font-work-sans">Gece Vakti</CardTitle>
+              <CardDescription>Diğer oyuncuların aksiyonlarını bekle</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-muted-foreground">Bu gece herhangi bir aksiyon yapman gerekmiyor. Rahatla ve bekle.</p>
+              <div className="text-2xl font-bold text-primary">{timeRemaining}s</div>
+              <Badge variant="secondary">Bekleniyor...</Badge>
+            </CardContent>
+          </Card>
+          {renderGeneralNotes()}
+        </div>
       </div>
     )
   }
 
   if (actionSubmitted) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="max-w-md w-full neon-border bg-card/50 backdrop-blur-sm">
-          <CardHeader className="text-center">
-            <div className="w-16 h-16 bg-green-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Target className="w-8 h-8 text-green-400" />
-            </div>
-            <CardTitle className="font-work-sans">Aksiyon Gönderildi</CardTitle>
-            <CardDescription>Diğer oyuncuları bekle</CardDescription>
-          </CardHeader>
-          <CardContent className="text-center space-y-4">
-            <p className="text-muted-foreground">Aksiyonun başarıyla gönderildi. Gece sonuçlarını bekle.</p>
-            <div className="text-2xl font-bold text-primary">{timeRemaining}s</div>
-            <Badge className="bg-green-400/20 text-green-400">Tamamlandı</Badge>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-background p-4">
+        <div className="max-w-md mx-auto space-y-6">
+          <Card className="neon-border bg-card/50 backdrop-blur-sm">
+            <CardHeader className="text-center">
+              <div className="w-16 h-16 bg-green-400/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Target className="w-8 h-8 text-green-400" />
+              </div>
+              <CardTitle className="font-work-sans">Aksiyon Gönderildi</CardTitle>
+              <CardDescription>Diğer oyuncuları bekle</CardDescription>
+            </CardHeader>
+            <CardContent className="text-center space-y-4">
+              <p className="text-muted-foreground">Aksiyonun başarıyla gönderildi. Gece sonuçlarını bekle.</p>
+              <div className="text-2xl font-bold text-primary">{timeRemaining}s</div>
+              <Badge className="bg-green-400/20 text-green-400">Tamamlandı</Badge>
+            </CardContent>
+          </Card>
+          {renderGeneralNotes()}
+        </div>
       </div>
     )
   }
@@ -210,26 +242,8 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
           </Card>
         )}
 
-        {/* General Results */}
-        {deaths.length > 0 && (
-          <Card className="bg-destructive/10 border-destructive/30 mb-6">
-            <CardHeader>
-              <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {deaths.map((player, idx) => (
-                  <div key={player.id} className="flex items-center gap-2">
-                    <Badge variant="destructive" className="text-xs">
-                      {idx + 1}.
-                    </Badge>
-                    <span className="font-medium">{player.name}</span>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* General Notes */}
+        {renderGeneralNotes()}
 
         {/* Special Info for Traitors */}
         {isTraitorRole(currentPlayer.role!) && aliveTraitors.length > 1 && (

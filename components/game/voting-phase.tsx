@@ -36,6 +36,29 @@ export function VotingPhase({
   const totalVotes = Object.keys(votes).length
   const aliveCount = allPlayers.filter((p) => p.isAlive).length
   const notes = playerNotes[currentPlayer.id] || []
+  const renderGeneralNotes = () => (
+    <Card className="bg-destructive/10 border-destructive/30 mb-6">
+      <CardHeader>
+        <CardTitle className="text-destructive font-work-sans">Genel Notlar</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {deaths.length > 0 ? (
+          <div className="space-y-2">
+            {deaths.map((player, idx) => (
+              <div key={player.id} className="flex items-center gap-2">
+                <Badge variant="destructive" className="text-xs">
+                  {idx + 1}.
+                </Badge>
+                <span className="font-medium">{player.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">Henüz kimse ölmedi</p>
+        )}
+      </CardContent>
+    </Card>
+  )
 
   const getPlayerInitials = (name: string) => {
     return name
@@ -89,25 +112,7 @@ export function VotingPhase({
             </Card>
           )}
 
-          {deaths.length > 0 && (
-            <Card className="bg-destructive/10 border-destructive/30 mb-6">
-              <CardHeader>
-                <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {deaths.map((player, idx) => (
-                    <div key={player.id} className="flex items-center gap-2">
-                      <Badge variant="destructive" className="text-xs">
-                        {idx + 1}.
-                      </Badge>
-                      <span className="font-medium">{player.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {renderGeneralNotes()}
 
           {/* Vote Progress */}
           <Card className="neon-border bg-card/50 backdrop-blur-sm">
@@ -196,25 +201,7 @@ export function VotingPhase({
             </Card>
           )}
 
-          {deaths.length > 0 && (
-            <Card className="bg-destructive/10 border-destructive/30 mb-6">
-              <CardHeader>
-                <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {deaths.map((player, idx) => (
-                    <div key={player.id} className="flex items-center gap-2">
-                      <Badge variant="destructive" className="text-xs">
-                        {idx + 1}.
-                      </Badge>
-                      <span className="font-medium">{player.name}</span>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {renderGeneralNotes()}
 
         {/* Player Selection */}
         <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">

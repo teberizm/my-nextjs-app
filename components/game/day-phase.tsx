@@ -57,13 +57,13 @@ export function DayPhase({
           </Card>
         )}
 
-        {/* Death Results */}
-        {deaths.length > 0 && (
-          <Card className="bg-destructive/10 border-destructive/30">
-            <CardHeader>
-              <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
-            </CardHeader>
-            <CardContent>
+        {/* General Notes */}
+        <Card className="bg-destructive/10 border-destructive/30">
+          <CardHeader>
+            <CardTitle className="text-destructive font-work-sans">Genel Notlar</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {deaths.length > 0 ? (
               <div className="space-y-2">
                 {deaths.map((player, idx) => (
                   <div key={player.id} className="flex items-center gap-2">
@@ -74,9 +74,11 @@ export function DayPhase({
                   </div>
                 ))}
               </div>
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <p className="text-sm text-muted-foreground">Henüz kimse ölmedi</p>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Player Status */}
         <PlayerStatus players={allPlayers} currentPlayer={currentPlayer} showRoles={false} />
