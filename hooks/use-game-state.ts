@@ -55,25 +55,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }))
   }, [])
 
-  useEffect(() => {
-    if (timeRemaining > 0) {
-      const timer = setTimeout(() => {
-        setTimeRemaining((prev) => prev - 1)
-      }, 1000)
-      return () => clearTimeout(timer)
-    } else if (
-      timeRemaining === 0 &&
-      currentPhase !== "LOBBY" &&
-      currentPhase !== "END" &&
-      currentPhase !== "CARD_DRAWING"
-    ) {
-      const phaseTimer = setTimeout(() => {
-        advancePhase()
-      }, 100)
-      return () => clearTimeout(phaseTimer)
-    }
-  }, [timeRemaining, currentPhase, advancePhase])
-
   const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
     const playersWithRoles = assignRoles(gamePlayers, settings)
 
@@ -103,6 +84,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   }, [])
 
   const processNightActions = useCallback(() => {
+    // Step 1: Guardians block their targets in timestamp order
     const blockedPlayers = new Set<string>()
     const guardianActions = nightActions
       .filter((action) => {
@@ -123,10 +105,36 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       }
     })
 
+    // Step 2: Resolve kills from unblocked killers
     const killers = nightActions.filter(
       (action) => action.actionType === "KILL" && !blockedPlayers.has(action.playerId),
     )
     const killTargets = killers.map((k) => k.targetId).filter(Boolean) as string[]
+
+    // Step 3: Resolve doctor revives after kills
+    const revivedPlayers = new Set<string>()
+    const doctorResults = new Map<string, { success: boolean }>()
+    nightActions
+      .filter((action) => {
+        const actor = players.find((p) => p.id === action.playerId)
+        return action.actionType === "PROTECT" && actor?.role === "DOCTOR"
+      })
+      .forEach((action) => {
+        const actor = players.find((p) => p.id === action.playerId)
+        const target = action.targetId ? players.find((p) => p.id === action.targetId) : null
+        if (!actor || blockedPlayers.has(actor.id)) {
+          doctorResults.set(action.playerId, { success: false })
+          return
+        }
+        if (target && (!target.isAlive || killTargets.includes(target.id))) {
+          revivedPlayers.add(target.id)
+          doctorResults.set(action.playerId, { success: true })
+        } else {
+          doctorResults.set(action.playerId, { success: false })
+        }
+      })
+
+    // Step 4: process remaining actions (watchers, survivors, bombs, etc.)
     const bombPlacers = nightActions.filter(
       (a) => a.actionType === "BOMB_PLANT" && !blockedPlayers.has(a.playerId),
     )
@@ -141,7 +149,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     const protectedPlayers = new Set<string>()
     const survivorActors = new Set<string>()
-    const revivedPlayers = new Set<string>()
 
     let detonateIndex = -1
 
@@ -167,11 +174,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
             result = { type: "PROTECT", remaining }
           }
         } else if (actor.role === "DOCTOR") {
-          if (target && (!target.isAlive || killTargets.includes(target.id))) {
-            revivedPlayers.add(target.id)
-            result = { type: "REVIVE", success: true }
-          } else {
-            result = { type: "REVIVE", success: false }
+          const docResult = doctorResults.get(actor.id)
+          if (docResult) {
+            result = { type: "REVIVE", success: docResult.success }
           }
         } else if (action.targetId) {
           protectedPlayers.add(action.targetId)
@@ -552,6 +557,25 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setDeathLog([])
     setBombTargets([])
   }, [])
+
+  useEffect(() => {
+    if (timeRemaining > 0) {
+      const timer = setTimeout(() => {
+        setTimeRemaining((prev) => prev - 1)
+      }, 1000)
+      return () => clearTimeout(timer)
+    } else if (
+      timeRemaining === 0 &&
+      currentPhase !== "LOBBY" &&
+      currentPhase !== "END" &&
+      currentPhase !== "CARD_DRAWING"
+    ) {
+      const phaseTimer = setTimeout(() => {
+        advancePhase()
+      }, 100)
+      return () => clearTimeout(phaseTimer)
+    }
+  }, [timeRemaining, currentPhase, advancePhase])
 
   // Bot simulation removed for realtime play
 
