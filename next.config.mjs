@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  productionBrowserSourceMaps: true,
   eslint: {
     ignoreDuringBuilds: true,
   },
@@ -10,5 +11,5 @@ const nextConfig = {
     unoptimized: true,
   },
 }
-
+module.exports = nextConfig;
 export default nextConfig
