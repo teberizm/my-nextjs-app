@@ -49,6 +49,7 @@ export interface Room {
 export interface GameSettings {
   traitorCount: number
   specialRoleCount: number
+  cardDrawCount: number
   nightDuration: number
   dayDuration: number
   voteDuration: number

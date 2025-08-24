@@ -12,6 +12,7 @@ import type { Player } from "@/lib/types"
 interface NightActionsProps {
   currentPlayer: Player
   allPlayers: Player[]
+  deaths: Player[]
   bombTargets: string[]
   onSubmitAction: (
     targetId: string | null,
@@ -21,7 +22,7 @@ interface NightActionsProps {
   playerNotes: Record<string, string[]>
 }
 
-export function NightActions({ currentPlayer, allPlayers, bombTargets, onSubmitAction, timeRemaining, playerNotes }: NightActionsProps) {
+export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, onSubmitAction, timeRemaining, playerNotes }: NightActionsProps) {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
   const [actionSubmitted, setActionSubmitted] = useState(false)
   const [mode, setMode] = useState<"KILL" | "ROLE">(
@@ -194,6 +195,7 @@ export function NightActions({ currentPlayer, allPlayers, bombTargets, onSubmitA
           </CardContent>
         </Card>
 
+
         {/* Notes */}
         {notes.length > 0 && (
           <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
@@ -204,6 +206,27 @@ export function NightActions({ currentPlayer, allPlayers, bombTargets, onSubmitA
               {notes.map((note, idx) => (
                 <div key={idx}>{note}</div>
               ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* General Results */}
+        {deaths.length > 0 && (
+          <Card className="bg-destructive/10 border-destructive/30 mb-6">
+            <CardHeader>
+              <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {deaths.map((player, idx) => (
+                  <div key={player.id} className="flex items-center gap-2">
+                    <Badge variant="destructive" className="text-xs">
+                      {idx + 1}.
+                    </Badge>
+                    <span className="font-medium">{player.name}</span>
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         )}

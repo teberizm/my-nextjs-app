@@ -83,6 +83,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
         <NightActions
           currentPlayer={currentPlayer}
           allPlayers={players}
+          deaths={deathLog}
           bombTargets={bombTargets}
           onSubmitAction={handleNightAction}
           timeRemaining={timeRemaining}
@@ -138,6 +139,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
           timeRemaining={timeRemaining}
           hasVoted={hasVoted}
           playerNotes={playerNotes}
+          deaths={deathLog}
         />
       )
 

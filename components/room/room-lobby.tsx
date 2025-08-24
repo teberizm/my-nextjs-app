@@ -320,6 +320,26 @@ export function RoomLobby({
               </Select>
             </div>
 
+            {/* Card Draw Count */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Kart Çekecek Oyuncu Sayısı</Label>
+              <Select
+                value={tempSettings.cardDrawCount.toString()}
+                onValueChange={(value) => handleSettingsChange("cardDrawCount", Number.parseInt(value))}
+              >
+                <SelectTrigger className="bg-background border-border">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">Kart Yok</SelectItem>
+                  <SelectItem value="1">1 Oyuncu</SelectItem>
+                  <SelectItem value="2">2 Oyuncu</SelectItem>
+                  <SelectItem value="3">3 Oyuncu</SelectItem>
+                  <SelectItem value="4">4 Oyuncu</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
             {/* Night Duration */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Gece Süresi: {tempSettings.nightDuration}s</Label>

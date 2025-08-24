@@ -17,6 +17,7 @@ interface VotingPhaseProps {
   timeRemaining: number
   hasVoted: boolean
   playerNotes: Record<string, string[]>
+  deaths: Player[]
 }
 
 export function VotingPhase({
@@ -27,6 +28,7 @@ export function VotingPhase({
   timeRemaining,
   hasVoted,
   playerNotes,
+  deaths,
 }: VotingPhaseProps) {
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
 
@@ -83,6 +85,26 @@ export function VotingPhase({
                 {notes.map((note, idx) => (
                   <div key={idx}>{note}</div>
                 ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {deaths.length > 0 && (
+            <Card className="bg-destructive/10 border-destructive/30 mb-6">
+              <CardHeader>
+                <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {deaths.map((player, idx) => (
+                    <div key={player.id} className="flex items-center gap-2">
+                      <Badge variant="destructive" className="text-xs">
+                        {idx + 1}.
+                      </Badge>
+                      <span className="font-medium">{player.name}</span>
+                    </div>
+                  ))}
+                </div>
               </CardContent>
             </Card>
           )}
@@ -161,18 +183,38 @@ export function VotingPhase({
           </CardContent>
         </Card>
 
-        {notes.length > 0 && (
-          <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
-            <CardHeader>
-              <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm">
-              {notes.map((note, idx) => (
-                <div key={idx}>{note}</div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
+          {notes.length > 0 && (
+            <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
+              <CardHeader>
+                <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                {notes.map((note, idx) => (
+                  <div key={idx}>{note}</div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {deaths.length > 0 && (
+            <Card className="bg-destructive/10 border-destructive/30 mb-6">
+              <CardHeader>
+                <CardTitle className="text-destructive font-work-sans">Genel Sonuçlar</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {deaths.map((player, idx) => (
+                    <div key={player.id} className="flex items-center gap-2">
+                      <Badge variant="destructive" className="text-xs">
+                        {idx + 1}.
+                      </Badge>
+                      <span className="font-medium">{player.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
         {/* Player Selection */}
         <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">

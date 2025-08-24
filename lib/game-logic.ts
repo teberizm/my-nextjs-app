@@ -174,29 +174,26 @@ export function getRoleInfo(role: PlayerRole) {
 export function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
   const alivePlayers = players.filter((p) => p.isAlive)
   const aliveTraitors = alivePlayers.filter((p) => isTraitorRole(p.role!))
-  const aliveBomber = alivePlayers.find((p) => p.role === "BOMBER")
+  const aliveBombers = alivePlayers.filter((p) => p.role === "BOMBER")
   const aliveNonTraitors = alivePlayers.filter(
     (p) => !isTraitorRole(p.role!) && p.role !== "BOMBER",
   )
 
-  if (aliveBomber) {
-    if (alivePlayers.length === 1) {
-      return { winner: "BOMBER", gameEnded: true }
-    }
-    if (aliveTraitors.length === 0 && aliveNonTraitors.length === 1) {
+  if (aliveBombers.length > 0) {
+    if (alivePlayers.length - aliveBombers.length <= 1) {
       return { winner: "BOMBER", gameEnded: true }
     }
   }
 
   if (
-    !aliveBomber &&
+    aliveBombers.length === 0 &&
     aliveTraitors.length >= aliveNonTraitors.length &&
     aliveTraitors.length > 0
   ) {
     return { winner: "TRAITORS", gameEnded: true }
   }
 
-  if (!aliveBomber && aliveTraitors.length === 0) {
+  if (aliveBombers.length === 0 && aliveTraitors.length === 0) {
     return { winner: "INNOCENTS", gameEnded: true }
   }
 

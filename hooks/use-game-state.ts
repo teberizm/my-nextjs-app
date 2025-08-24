@@ -264,7 +264,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     let bombVictims: Player[] = []
     if (detonateIndex !== -1) {
-      bombVictims = players.filter((p) => newBombTargets.includes(p.id))
+      bombVictims = players.filter((p) => newBombTargets.includes(p.id) && p.isAlive)
       const victimNames = bombVictims.map((p) => p.name)
       updatedActions[detonateIndex] = {
         ...updatedActions[detonateIndex],
@@ -311,6 +311,27 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     newBombTargets = newBombTargets.filter((id) => !newDeaths.some((p) => p.id === id))
     setBombTargets(newBombTargets)
+
+    // Add kill notes for attackers
+    nightActions
+      .filter((a) => a.actionType === "KILL")
+      .forEach((action) => {
+        const actor = players.find((p) => p.id === action.playerId)
+        const target = players.find((p) => p.id === action.targetId)
+        if (actor && target) {
+          const killed = newDeaths.some((d) => d.id === target.id)
+          const note = `${currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? " ve öldürdün" : ""}`
+          addPlayerNote(actor.id, note)
+        }
+      })
+
+    // Add notes for players without actions
+    const actedIds = new Set(nightActions.map((a) => a.playerId))
+    players.forEach((p) => {
+      if (p.isAlive && !actedIds.has(p.id)) {
+        addPlayerNote(p.id, `${currentTurn}. Gece: hiçbir şey yapmadın`)
+      }
+    })
 
     setNightActions(updatedActions)
 
@@ -402,11 +423,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       case "DEATH_ANNOUNCEMENT":
         const alivePlayers = players.filter((p) => p.isAlive)
         const shuffled = [...alivePlayers].sort(() => Math.random() - 0.5)
-        const cardDrawers = shuffled.slice(0, Math.min(2, alivePlayers.length))
+        const drawCount = game?.settings.cardDrawCount || 0
+        const cardDrawers = shuffled.slice(0, Math.min(drawCount, alivePlayers.length))
         setSelectedCardDrawers(cardDrawers.map((p) => p.id))
         setCurrentCardDrawer(cardDrawers[0]?.id || null)
-        setCurrentPhase("CARD_DRAWING")
-        setTimeRemaining(10)
+        if (cardDrawers.length > 0) {
+          setCurrentPhase("CARD_DRAWING")
+          setTimeRemaining(10)
+        } else {
+          setCurrentPhase("DAY_DISCUSSION")
+          setTimeRemaining(game?.settings.dayDuration || 15)
+        }
         break
 
       case "CARD_DRAWING":
@@ -415,16 +442,16 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           setCurrentCardDrawer(selectedCardDrawers[currentIndex + 1])
           setTimeRemaining(10)
         } else {
-          setCurrentPhase("DAY_DISCUSSION")
-          setTimeRemaining(15)
-          setSelectedCardDrawers([])
-          setCurrentCardDrawer(null)
-        }
-        break
+        setCurrentPhase("DAY_DISCUSSION")
+        setTimeRemaining(game?.settings.dayDuration || 15)
+        setSelectedCardDrawers([])
+        setCurrentCardDrawer(null)
+      }
+      break
 
       case "DAY_DISCUSSION":
         setCurrentPhase("VOTE")
-        setTimeRemaining(15)
+        setTimeRemaining(game?.settings.voteDuration || 15)
         break
 
       case "VOTE":
@@ -444,7 +471,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         } else {
           setCurrentTurn((prev) => prev + 1)
           setCurrentPhase("NIGHT")
-          setTimeRemaining(15)
+          setTimeRemaining(game?.settings.nightDuration || 15)
           setDeathsThisTurn([])
           setVotes({})
         }
@@ -484,10 +511,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         return
       }
 
-      setVotes((prev) => ({
-        ...prev,
-        [voterId]: targetId,
-      }))
+      setVotes((prev) => {
+        const newVotes = { ...prev, [voterId]: targetId }
+        const aliveCount = players.filter((p) => p.isAlive).length
+        if (Object.keys(newVotes).length >= aliveCount) {
+          setTimeRemaining(0)
+        }
+        return newVotes
+      })
     },
     [players],
   )

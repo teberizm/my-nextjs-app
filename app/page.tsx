@@ -14,6 +14,7 @@ export default function HomePage() {
   const [gameSettings, setGameSettings] = useState<GameSettings>({
     traitorCount: 2,
     specialRoleCount: 2,
+    cardDrawCount: 2,
     nightDuration: 60,
     dayDuration: 120,
     voteDuration: 45,

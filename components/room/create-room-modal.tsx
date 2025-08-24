@@ -29,6 +29,7 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
   const [maxPlayers, setMaxPlayers] = useState([8])
   const [traitorCount, setTraitorCount] = useState([2])
   const [specialRoleCount, setSpecialRoleCount] = useState([2])
+  const [cardDrawCount, setCardDrawCount] = useState([2])
   const [nightDuration, setNightDuration] = useState([60])
   const [dayDuration, setDayDuration] = useState([120])
   const [voteDuration, setVoteDuration] = useState([45])
@@ -39,6 +40,7 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
       maxPlayers: maxPlayers[0],
       traitorCount: traitorCount[0],
       specialRoleCount: specialRoleCount[0],
+      cardDrawCount: cardDrawCount[0],
       nightDuration: nightDuration[0],
       dayDuration: dayDuration[0],
       voteDuration: voteDuration[0],
@@ -103,6 +105,19 @@ export function CreateRoomModal({ onCreateRoom, children }: CreateRoomModalProps
             <Slider
               value={specialRoleCount}
               onValueChange={setSpecialRoleCount}
+              max={4}
+              min={0}
+              step={1}
+              className="w-full"
+            />
+          </div>
+
+          {/* Card Draw Count */}
+          <div className="space-y-3">
+            <Label className="text-purple-400">Kart Çekecek Oyuncu Sayısı: {cardDrawCount[0]}</Label>
+            <Slider
+              value={cardDrawCount}
+              onValueChange={setCardDrawCount}
               max={4}
               min={0}
               step={1}
