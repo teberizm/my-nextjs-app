@@ -33,7 +33,7 @@ export interface GameEventData {
   playerId?: string
 }
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001"
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://play.tebova.com/socket"
 
 export class WebSocketClient extends EventEmitter {
   private socket: WebSocket | null = null

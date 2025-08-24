@@ -1,80 +1,27 @@
-const { WebSocketServer } = require('ws');
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
 
-const wss = new WebSocketServer({ port: 3001 });
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
-const rooms = new Map();
+wss.on('connection', function connection(ws) {
+  console.log('Yeni bağlantı geldi.');
 
-function broadcast(roomId, message) {
-  const room = rooms.get(roomId);
-  if (!room) return;
-  const data = JSON.stringify(message);
-  for (const client of room.clients) {
-    if (client.ws.readyState === 1) {
-      client.ws.send(data);
-    }
-  }
-}
-
-wss.on('connection', (ws) => {
-  let currentRoom = null;
-  let player = null;
-
-  ws.on('message', (msg) => {
-    let data;
-    try {
-      data = JSON.parse(msg.toString());
-    } catch (e) {
-      return;
-    }
-    switch (data.type) {
-      case 'JOIN_ROOM': {
-        currentRoom = data.payload.roomId;
-        player = data.payload.player;
-        if (!rooms.has(currentRoom)) {
-          rooms.set(currentRoom, { clients: [] });
-        }
-        const room = rooms.get(currentRoom);
-        room.clients.push({ ws, player });
-        ws.send(
-          JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: currentRoom, player } })
-        );
-        broadcast(currentRoom, {
-          type: 'PLAYER_LIST_UPDATED',
-          payload: { players: room.clients.map((c) => c.player) },
-        });
-        break;
-      }
-      case 'KICK_PLAYER': {
-        if (!currentRoom) return;
-        const targetId = data.payload.playerId;
-        const room = rooms.get(currentRoom);
-        const target = room.clients.find((c) => c.player.id === targetId);
-        if (target) {
-          target.ws.send(
-            JSON.stringify({ type: 'PLAYER_KICKED', payload: { playerId: targetId } })
-          );
-          target.ws.close();
-        }
-        break;
-      }
-      default: {
-        if (currentRoom) {
-          broadcast(currentRoom, data);
-        }
-      }
-    }
+  ws.on('message', function incoming(message) {
+    console.log('Gelen mesaj:', message);
+    ws.send(`Echo: ${message}`);
   });
 
   ws.on('close', () => {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room) return;
-    room.clients = room.clients.filter((c) => c.ws !== ws);
-    broadcast(currentRoom, {
-      type: 'PLAYER_LIST_UPDATED',
-      payload: { players: room.clients.map((c) => c.player) },
-    });
+    console.log('Bağlantı kapandı.');
   });
 });
 
-console.log('WebSocket server running on ws://localhost:3001');
+app.get('/', (req, res) => res.send('Socket server OK'));
+
+server.listen(3001, '0.0.0.0', () => {
+  console.log('✅ WebSocket sunucu çalışıyor http://0.0.0.0:3001');
+});
+
