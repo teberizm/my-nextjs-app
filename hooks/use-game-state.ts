@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { assignRoles, getRoleInfo } from "@/lib/game-logic"
 import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 
@@ -527,6 +527,23 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }
   }, [currentPhase, game, players, processNightActions, processVotes, selectedCardDrawers, currentCardDrawer])
 
+  // ---- TDZ-KESİCİ: advancePhase için ref + hoisted fonksiyon ----
+
+  // Ref'i dummy fonksiyonla başlat (advancePhase henüz tanımlı olmayabilir)
+  const advancePhaseRef = useRef<() => void>(() => {})
+
+  // En güncel advancePhase'i ref'e yaz
+  useEffect(() => {
+    advancePhaseRef.current = advancePhase
+  }, [advancePhase])
+
+  // Hoisted fonksiyon: dependency gerektirmeden çağrılabilir
+  function handlePhaseTimeout() {
+    advancePhaseRef.current()
+  }
+
+  // ---------------------------------------------------------------
+
   const submitNightAction = useCallback(
     (
       playerId: string,
@@ -583,28 +600,24 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setBombTargets([])
   }, [])
 
-  const handlePhaseTimeout = useCallback(() => {
-    advancePhase()
-  }, [advancePhase])
-
   useEffect(() => {
     if (timeRemaining > 0) {
       const timer = setTimeout(() => {
         setTimeRemaining((prev) => prev - 1)
       }, 1000)
       return () => clearTimeout(timer)
-    } else if (
+    }
+
+    if (
       timeRemaining === 0 &&
       currentPhase !== "LOBBY" &&
       currentPhase !== "END" &&
       currentPhase !== "CARD_DRAWING"
     ) {
-      const phaseTimer = setTimeout(() => {
-        handlePhaseTimeout()
-      }, 100)
+      const phaseTimer = setTimeout(handlePhaseTimeout, 100)
       return () => clearTimeout(phaseTimer)
     }
-  }, [timeRemaining, currentPhase, handlePhaseTimeout])
+  }, [timeRemaining, currentPhase])
 
   // Bot simulation removed for realtime play
 
