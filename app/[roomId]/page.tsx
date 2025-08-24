@@ -86,7 +86,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     }))
   }
 
-  const realtime = currentPlayer ? useRealtimeGame(currentRoom.id, currentPlayer) : null
+  const realtime = useRealtimeGame(currentRoom.id, currentPlayer)
 
   useEffect(() => {
     const handleKicked = (data: any) => {
@@ -109,7 +109,10 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     return <JoinRoomDialog onJoin={handleJoin} />
   }
 
-  const roomWithPlayers = { ...currentRoom, players: realtime?.players || currentRoom.players }
+  const roomWithPlayers = {
+    ...currentRoom,
+    players: realtime.players.length ? realtime.players : currentRoom.players,
+  }
 
   return (
     <>

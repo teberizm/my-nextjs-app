@@ -22,7 +22,7 @@ interface GameNotification {
   autoHide?: boolean
 }
 
-export function useRealtimeGame(roomId: string, player: Player) {
+export function useRealtimeGame(roomId: string, player: Player | null) {
   const [gameState, setGameState] = useState<RealtimeGameState>({
     connected: false,
     room: null,
@@ -303,8 +303,8 @@ export function useRealtimeGame(roomId: string, player: Player) {
 
   // Connect to room on mount
   useEffect(() => {
+    if (!player) return
     wsClient.connect(roomId, player)
-
     return () => {
       wsClient.disconnect()
     }
