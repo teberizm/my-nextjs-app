@@ -26,8 +26,18 @@ interface GameStateHook {
 }
 
 export function useGameState(currentPlayerId: string): GameStateHook {
+  const makePlayer = (id: string): Player => ({
+    id,
+    name: id,
+    isOwner: false,
+    isAlive: true,
+    isMuted: false,
+    hasShield: false,
+    connectedAt: new Date(),
+  })
+
   const [game, setGame] = useState<Game | null>(null)
-  const [players, setPlayers] = useState<Player[]>([])
+  const [players, setPlayers] = useState<Player[]>([makePlayer(currentPlayerId)])
   const [currentPhase, setCurrentPhase] = useState<GamePhase>("LOBBY")
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [currentTurn, setCurrentTurn] = useState(1)
@@ -41,18 +51,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const isGameOwner = currentPlayer?.isOwner || false
 
   useEffect(() => {
-    const toPlayer = (id: string): Player => ({
-      id,
-      name: id,
-      isOwner: false,
-      isAlive: true,
-      isMuted: false,
-      hasShield: false,
-      connectedAt: new Date(),
-    })
-
     const normalize = (raw: any[]): Player[] =>
-      raw.map((p: any) => (typeof p === "string" ? toPlayer(p) : { ...toPlayer(p.id), ...p }))
+      raw.map((p: any) => (typeof p === "string" ? makePlayer(p) : { ...makePlayer(p.id), ...p }))
 
     const handleRoomJoined = (data: GameEventData) => {
       if (data.payload?.players) {
@@ -60,7 +60,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       } else if (data.payload?.playerId) {
         setPlayers((prev) => {
           const exists = prev.some((p) => p.id === data.payload.playerId)
-          return exists ? prev : [...prev, toPlayer(data.payload.playerId as string)]
+          return exists ? prev : [...prev, makePlayer(data.payload.playerId as string)]
         })
       }
     }

@@ -39,7 +39,11 @@ export class WebSocketClient extends EventEmitter {
     this.roomId = roomId
     this.playerId = playerId
 
-    const url = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001"
+    const defaultUrl =
+      typeof window !== "undefined"
+        ? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}${window.location.port ? `:${parseInt(window.location.port) + 1}` : ""}`
+        : "ws://localhost:3001"
+    const url = process.env.NEXT_PUBLIC_WS_URL || defaultUrl
     this.socket = new WebSocket(url)
 
     this.socket.onopen = () => {
