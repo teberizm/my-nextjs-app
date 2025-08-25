@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Eye, EyeOff } from "lucide-react"
 import { getRoleInfo } from "@/lib/game-logic"
-import type { Player } from "@/lib/types"
+import type { Player, PlayerRole } from "@/lib/types"
 
 interface RoleRevealProps {
   player: Player
@@ -17,16 +17,39 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
   const [isRevealed, setIsRevealed] = useState(false)
   const [timeLeft, setTimeLeft] = useState(10)
 
-  const roleInfo = getRoleInfo(player.displayRole || player.role!)
+  // Rol henüz set edilmemiş olabilir → guard
+  const rawRole: PlayerRole | undefined =
+    (player?.displayRole as PlayerRole | undefined) ?? (player?.role as PlayerRole | undefined)
 
   useEffect(() => {
-    if (isRevealed && timeLeft > 0) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000)
-      return () => clearTimeout(timer)
-    } else if (timeLeft === 0) {
+    if (!isRevealed) return
+    if (timeLeft <= 0) {
       onContinue()
+      return
     }
+    const t = setTimeout(() => setTimeLeft((s) => s - 1), 1000)
+    return () => clearTimeout(t)
   }, [isRevealed, timeLeft, onContinue])
+
+  // Henüz rol yoksa “hazırlanıyor” ekranı
+  if (!rawRole) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="max-w-md w-full neon-border bg-card/50 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="font-work-sans text-2xl">Roller Hazırlanıyor</CardTitle>
+            <CardDescription>Lütfen bekleyin…</CardDescription>
+          </CardHeader>
+          <CardContent className="text-center space-y-6">
+            <div className="w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Artık güvenli: getRoleInfo her zaman default ile döner
+  const roleInfo = getRoleInfo(rawRole)
 
   if (!isRevealed) {
     return (
@@ -36,7 +59,7 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
             <CardTitle className="font-work-sans text-2xl">Rolün Hazır</CardTitle>
             <CardDescription>Rolünü görmek için butona bas. Sadece sen görebilirsin!</CardDescription>
           </CardHeader>
-          <CardContent className="text-center space-y-6">
+        <CardContent className="text-center space-y-6">
             <div className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto holographic-glow">
               <EyeOff className="w-12 h-12 text-primary" />
             </div>
@@ -61,7 +84,9 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
           <div className="text-6xl mb-4">{roleInfo.icon}</div>
           <CardTitle className={`font-work-sans text-3xl ${roleInfo.color}`}>{roleInfo.name}</CardTitle>
           <CardDescription className="text-lg">
-            Sen bir <Badge className={`${roleInfo.bgColor} ${roleInfo.color} border-0`}>{roleInfo.name}</Badge>sın
+            Sen bir{" "}
+            <Badge className={`${roleInfo.bgColor} ${roleInfo.color} border-0`}>{roleInfo.name}</Badge>
+            sın
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
