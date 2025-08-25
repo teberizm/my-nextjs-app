@@ -100,51 +100,52 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   }, [])
 
   /** ----------------- OWNER-ONLY: Oyun başlat ----------------- */
-  const startGame = useCallback(
-    (gamePlayers: Player[], settings: GameSettings) => {
-      if (!currentPlayerId) return
+  const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
+  // SADECE OWNER assignRoles çalıştırmalı
+  if (isGameOwner) {
+    const playersWithRoles = assignRoles(gamePlayers, settings)
 
-      if (isGameOwner) {
-        // 1) Rolleri OWNER dağıtır:
-        const playersWithRoles = assignRoles(gamePlayers, settings)
+    const newGame: Game = {
+      id: Math.random().toString(36).substring(2, 15),
+      roomId: Math.random().toString(36).substring(2, 15),
+      phase: "ROLE_REVEAL",
+      currentTurn: 1,
+      settings,
+      seed: Math.random().toString(36).substring(2, 15),
+      startedAt: new Date(),
+    }
 
-        // 2) Local state’i kur:
-        const newGame: Game = {
-          id: Math.random().toString(36).substring(2, 15),
-          roomId: Math.random().toString(36).substring(2, 15),
-          phase: "ROLE_REVEAL",
-          currentTurn: 1,
-          settings,
-          seed: Math.random().toString(36).substring(2, 15),
-          startedAt: new Date(),
-        }
-        setGame(newGame)
-        setPlayers(playersWithRoles)
-        setCurrentPhase("ROLE_REVEAL")
-        setTimeRemaining(15)
-        setCurrentTurn(1)
-        setNightActions([])
-        setVotes({})
-        setSelectedCardDrawers([])
-        setCurrentCardDrawer(null)
-        setDeathsThisTurn([])
-        setDeathLog([])
-        setBombTargets([])
-        setPlayerNotes({})
+    // Local state’i set et
+    setGame(newGame)
+    setPlayers(playersWithRoles)
+    setCurrentPhase("ROLE_REVEAL")
+    setTimeRemaining(15)
+    setCurrentTurn(1)
+    setNightActions([])
+    setVotes({})
+    setSelectedCardDrawers([])
+    setCurrentCardDrawer(null)
+    setDeathsThisTurn([])
+    setDeathLog([])
+    setBombTargets([])
+    setPlayerNotes({})
 
-        // 3) Herkese yayınla:
-        wsClient.sendEvent("GAME_STARTED" as WSEvent, {
-          players: playersWithRoles,
-          settings,
-          initiatorId: currentPlayerId,
-        })
-      } else {
-        // Non-owner: hiçbir rol dağıtımı yapma; GAME_STARTED’i bekle.
-        // UI countdown göstermek istersen burada local state’e dokunma.
-      }
-    },
-    [isGameOwner, currentPlayerId, addPlayerNote],
-  )
+    // *** KRİTİK: Herkese aynı rollerin gönderilmesi ***
+    wsClient.sendEvent("GAME_STARTED", {
+      game: {
+        id: newGame.id,
+        phase: "ROLE_REVEAL",
+        currentTurn: 1,
+        settings,
+        seed: newGame.seed,
+        startedAt: newGame.startedAt,
+      },
+      players: playersWithRoles,
+    })
+  } else {
+    // Non-owner: burada hiçbir şey yapma; GAME_STARTED bekle
+  }
+}, [isGameOwner])
 
   /** ----------------- OWNER-ONLY: Gece çözümleyici ----------------- */
   const processNightActions = useCallback(() => {
