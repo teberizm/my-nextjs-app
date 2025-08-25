@@ -1,26 +1,19 @@
-// use-game-state.ts
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
-import { assignRoles, getRoleInfo } from "@/lib/game-logic" // rolleri dağıtmak için (yalnız OWNER)
-import type {
-  GamePhase,
-  Player,
-  Game,
-  GameSettings,
-  NightAction,
-  PlayerRole,
-} from "@/lib/types"
+import { assignRoles, getWinCondition, getRoleInfo } from "@/lib/game-logic"
+import type { GamePhase, Player, Game, GameSettings, NightAction, PlayerRole } from "@/lib/types"
 import { wsClient } from "@/lib/websocket-client"
 
-/** WS event adları (server ile uyumlu) */
-type WSEvent =
-  | "GAME_STARTED"
-  | "PHASE_CHANGED"
-  | "STATE_SNAPSHOT"
-  | "NIGHT_ACTION_UPDATED"
-  | "VOTE_CAST"
-  | "PLAYER_LIST_UPDATED"
+/**
+ * NOT:
+ * - Sunucunuz şu an yalnızca JOIN_ROOM / PLAYER_LIST_UPDATED / GAME_STARTED destekliyor.
+ * - Bu hook, rollerin HERKESTE AYNI görünmesi için owner’ı tek otorite yapar:
+ *   Owner start edince assignRoles çalıştırır ve {game, players} snapshot’ını GAME_STARTED ile yayınlar.
+ *   Diğer client’lar assignRoles ÇALIŞTIRMAZ; gelen snapshot’ı doğrudan set eder.
+ * - Faz/Not/Ölüm senkronu için opsiyonel olarak PHASE_CHANGED ve STATE_SNAPSHOT da gönderiliyor.
+ *   ws-server’a bu event’leri eklediğinde anında tam senkron olursun.
+ */
 
 interface GameStateHook {
   game: Game | null
@@ -48,32 +41,8 @@ interface GameStateHook {
   resetGame: () => void
 }
 
-/** Kazanma koşulları (owner hesaplar) */
-function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
-  const alivePlayers = players.filter((p) => p.isAlive)
-  const aliveTraitors = alivePlayers.filter((p) =>
-    ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role!),
-  )
-  const aliveBombers = alivePlayers.filter((p) => p.role === "BOMBER")
-  const aliveNonTraitors = alivePlayers.filter(
-    (p) =>
-      !["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role!) &&
-      p.role !== "BOMBER",
-  )
-
-  if (aliveBombers.length > 0 && alivePlayers.length - aliveBombers.length <= 1) {
-    return { winner: "BOMBER", gameEnded: true }
-  }
-  if (aliveBombers.length === 0 && aliveTraitors.length >= aliveNonTraitors.length && aliveTraitors.length > 0) {
-    return { winner: "TRAITORS", gameEnded: true }
-  }
-  if (aliveBombers.length === 0 && aliveTraitors.length === 0) {
-    return { winner: "INNOCENTS", gameEnded: true }
-  }
-  return { winner: null, gameEnded: false }
-}
-
 export function useGameState(currentPlayerId: string): GameStateHook {
+  // ---- STATE ----
   const [game, setGame] = useState<Game | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [currentPhase, setCurrentPhase] = useState<GamePhase>("LOBBY")
@@ -88,10 +57,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [bombTargets, setBombTargets] = useState<string[]>([])
   const [playerNotes, setPlayerNotes] = useState<Record<string, string[]>>({})
 
+  // Mevcut oyuncu / owner bilgisi (players değiştikçe yeniden hesaplanır)
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
-  const isGameOwner = currentPlayer?.isOwner || false
+  const isGameOwner = Boolean(currentPlayer?.isOwner)
 
-  /** Player’a özel not ekleme (owner hesaplar ve snapshot ile dağıtır) */
+  // ---- HELPERS ----
   const addPlayerNote = useCallback((playerId: string, note: string) => {
     setPlayerNotes((prev) => ({
       ...prev,
@@ -99,60 +69,178 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }))
   }, [])
 
-  /** ----------------- OWNER-ONLY: Oyun başlat ----------------- */
-  const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
-  // SADECE OWNER assignRoles çalıştırmalı
-  if (isGameOwner) {
-    const playersWithRoles = assignRoles(gamePlayers, settings)
+  // ---- OWNER-ONLY: Full snapshot yayınla (opsiyonel, ws-server'a STATE_SNAPSHOT eklendiğinde çalışır) ----
+  const publishSnapshot = useCallback(() => {
+    if (!isGameOwner) return
+    wsClient.sendEvent("STATE_SNAPSHOT" as any, {
+      game,
+      players,
+      currentPhase,
+      timeRemaining,
+      currentTurn,
+      nightActions,
+      votes,
+      selectedCardDrawers,
+      currentCardDrawer,
+      deathsThisTurn,
+      deathLog,
+      bombTargets,
+      playerNotes,
+    })
+  }, [
+    isGameOwner,
+    game,
+    players,
+    currentPhase,
+    timeRemaining,
+    currentTurn,
+    nightActions,
+    votes,
+    selectedCardDrawers,
+    currentCardDrawer,
+    deathsThisTurn,
+    deathLog,
+    bombTargets,
+    playerNotes,
+  ])
 
-    const newGame: Game = {
-      id: Math.random().toString(36).substring(2, 15),
-      roomId: Math.random().toString(36).substring(2, 15),
-      phase: "ROLE_REVEAL",
-      currentTurn: 1,
-      settings,
-      seed: Math.random().toString(36).substring(2, 15),
-      startedAt: new Date(),
-    }
+  // ---- GAME START (owner authoritative) ----
+  const startGame = useCallback(
+    (gamePlayers: Player[], settings: GameSettings) => {
+      // Bu aşamada players[] henüz boş olabilir; owner bilgisini initial listeden belirleyelim.
+      const me = gamePlayers.find((p) => p.id === currentPlayerId)
+      const iAmOwner = Boolean(me?.isOwner)
 
-    // Local state’i set et
-    setGame(newGame)
-    setPlayers(playersWithRoles)
-    setCurrentPhase("ROLE_REVEAL")
-    setTimeRemaining(15)
-    setCurrentTurn(1)
-    setNightActions([])
-    setVotes({})
-    setSelectedCardDrawers([])
-    setCurrentCardDrawer(null)
-    setDeathsThisTurn([])
-    setDeathLog([])
-    setBombTargets([])
-    setPlayerNotes({})
+      if (!iAmOwner) {
+        // Non-owner burada hiçbir şey yapmaz; GAME_STARTED snapshot’ını bekler.
+        return
+      }
 
-    // *** KRİTİK: Herkese aynı rollerin gönderilmesi ***
-    wsClient.sendEvent("GAME_STARTED", {
-      game: {
-        id: newGame.id,
+      // OWNER → roller tek yerde dağıtılır
+      const playersWithRoles = assignRoles(gamePlayers, settings)
+
+      const newGame: Game = {
+        id: Math.random().toString(36).substring(2, 15),
+        roomId: Math.random().toString(36).substring(2, 15),
         phase: "ROLE_REVEAL",
         currentTurn: 1,
         settings,
-        seed: newGame.seed,
-        startedAt: newGame.startedAt,
-      },
-      players: playersWithRoles,
-    })
-  } else {
-    // Non-owner: burada hiçbir şey yapma; GAME_STARTED bekle
-  }
-}, [isGameOwner])
+        seed: Math.random().toString(36).substring(2, 15),
+        startedAt: new Date(),
+      }
 
-  /** ----------------- OWNER-ONLY: Gece çözümleyici ----------------- */
+      // Local set
+      setGame(newGame)
+      setPlayers(playersWithRoles)
+      setCurrentPhase("ROLE_REVEAL")
+      setTimeRemaining(15)
+      setCurrentTurn(1)
+      setNightActions([])
+      setVotes({})
+      setSelectedCardDrawers([])
+      setCurrentCardDrawer(null)
+      setDeathsThisTurn([])
+      setDeathLog([])
+      setBombTargets([])
+      setPlayerNotes({})
+
+      // BÜYÜK NOKTA: Aynı snapshot HERKESE yayınlanır
+      wsClient.sendEvent("GAME_STARTED" as any, {
+        game: {
+          id: newGame.id,
+          roomId: newGame.roomId,
+          phase: newGame.phase,
+          currentTurn: newGame.currentTurn,
+          settings: newGame.settings,
+          seed: newGame.seed,
+          startedAt: newGame.startedAt,
+        },
+        players: playersWithRoles,
+      })
+    },
+    [currentPlayerId],
+  )
+
+  // ---- EVENTS: GAME_STARTED (NON-OWNER) & opsiyonel STATE_SNAPSHOT/PHASE_CHANGED dinleyicileri ----
+  useEffect(() => {
+    // GAME_STARTED → snapshot kur
+    const onGameStarted = (data: any) => {
+      const payload = data?.payload
+      if (!payload) return
+
+      const incomingGame = payload.game as Partial<Game> | undefined
+      const incomingPlayers = payload.players as Player[] | undefined
+      if (!incomingGame || !incomingPlayers || incomingPlayers.length === 0) return
+
+      // Owner da bu olayı alabilir; ancak owner zaten local state’i set etti.
+      // Non-owner için kritik: assignRoles çalıştırmadan snapshot’ı doğrudan set eder.
+      setGame({
+        id: incomingGame.id || Math.random().toString(36).substring(2, 15),
+        roomId: incomingGame.roomId || "",
+        phase: (incomingGame.phase as GamePhase) || "ROLE_REVEAL",
+        currentTurn: incomingGame.currentTurn ?? 1,
+        settings: (incomingGame.settings as GameSettings)!,
+        seed: incomingGame.seed || "",
+        startedAt: incomingGame.startedAt ? new Date(incomingGame.startedAt) : new Date(),
+      })
+      setPlayers(incomingPlayers)
+      setCurrentPhase((incomingGame.phase as GamePhase) || "ROLE_REVEAL")
+      setTimeRemaining(15)
+      setCurrentTurn(incomingGame.currentTurn ?? 1)
+      setNightActions([])
+      setVotes({})
+      setSelectedCardDrawers([])
+      setCurrentCardDrawer(null)
+      setDeathsThisTurn([])
+      setDeathLog([])
+      setBombTargets([])
+      setPlayerNotes({})
+    }
+
+    // PHASE_CHANGED → (opsiyonel) faz eşitle
+    const onPhaseChanged = (data: any) => {
+      const p = data?.payload
+      if (!p) return
+      const nextPhase = p.phase as GamePhase | undefined
+      const tr = typeof p.timeRemaining === "number" ? p.timeRemaining : undefined
+      if (nextPhase) setCurrentPhase(nextPhase)
+      if (typeof tr === "number") setTimeRemaining(tr)
+      if (typeof p.currentTurn === "number") setCurrentTurn(p.currentTurn)
+    }
+
+    // STATE_SNAPSHOT → (opsiyonel) tam eşitle
+    const onSnapshot = (data: any) => {
+      const s = data?.payload
+      if (!s) return
+      // Owner gönderir; diğerleri aynen uygular
+      setGame(s.game || null)
+      setPlayers(Array.isArray(s.players) ? s.players : [])
+      setCurrentPhase(s.currentPhase ?? "LOBBY")
+      setTimeRemaining(typeof s.timeRemaining === "number" ? s.timeRemaining : 0)
+      setCurrentTurn(typeof s.currentTurn === "number" ? s.currentTurn : 1)
+      setNightActions(Array.isArray(s.nightActions) ? s.nightActions : [])
+      setVotes(s.votes || {})
+      setSelectedCardDrawers(Array.isArray(s.selectedCardDrawers) ? s.selectedCardDrawers : [])
+      setCurrentCardDrawer(s.currentCardDrawer ?? null)
+      setDeathsThisTurn(Array.isArray(s.deathsThisTurn) ? s.deathsThisTurn : [])
+      setDeathLog(Array.isArray(s.deathLog) ? s.deathLog : [])
+      setBombTargets(Array.isArray(s.bombTargets) ? s.bombTargets : [])
+      setPlayerNotes(s.playerNotes || {})
+    }
+
+    wsClient.on("GAME_STARTED" as any, onGameStarted)
+    wsClient.on("PHASE_CHANGED" as any, onPhaseChanged)
+    wsClient.on("STATE_SNAPSHOT" as any, onSnapshot)
+    return () => {
+      wsClient.off("GAME_STARTED" as any, onGameStarted)
+      wsClient.off("PHASE_CHANGED" as any, onPhaseChanged)
+      wsClient.off("STATE_SNAPSHOT" as any, onSnapshot)
+    }
+  }, [])
+
+  // ---- GECE ÇÖZÜMLEME ----
   const processNightActions = useCallback(() => {
-    // OWNER dışında kimse hesap yapmasın
-    if (!isGameOwner) return
-
-    // 1) Guard’lar: block hedefleri
+    // 1) Engellemeler (Guardian)
     const blockedPlayers = new Set<string>()
     const guardianActions = nightActions
       .filter((action) => {
@@ -173,40 +261,40 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       }
     })
 
-    // 2) Engellenmeyen KILL’ler
+    // 2) Öldürmeler (engellenmemiş)
     const killers = nightActions.filter(
-      (action) => action.actionType === "KILL" && !blockedPlayers.has(action.playerId),
+      (a) => a.actionType === "KILL" && !blockedPlayers.has(a.playerId),
     )
     const killTargets = killers.map((k) => k.targetId).filter(Boolean) as string[]
 
-    // 3) Doktor reviveleri (KILL’lerden sonra)
+    // 3) Doktor diriltmeleri
     const revivedPlayers = new Set<string>()
     const doctorResults = new Map<string, { success: boolean }>()
     nightActions
-      .filter((action) => {
-        const actor = players.find((p) => p.id === action.playerId)
-        return action.actionType === "PROTECT" && actor?.role === "DOCTOR"
+      .filter((a) => {
+        const actor = players.find((p) => p.id === a.playerId)
+        return a.actionType === "PROTECT" && actor?.role === "DOCTOR"
       })
-      .forEach((action) => {
-        const actor = players.find((p) => p.id === action.playerId)
-        const target = action.targetId ? players.find((p) => p.id === action.targetId) : null
+      .forEach((a) => {
+        const actor = players.find((p) => p.id === a.playerId)
+        const target = a.targetId ? players.find((p) => p.id === a.targetId) : null
         if (!actor || blockedPlayers.has(actor.id)) {
-          doctorResults.set(action.playerId, { success: false })
+          doctorResults.set(a.playerId, { success: false })
           return
         }
         if (target && (!target.isAlive || killTargets.includes(target.id))) {
           revivedPlayers.add(target.id)
-          doctorResults.set(action.playerId, { success: true })
+          doctorResults.set(a.playerId, { success: true })
         } else {
-          doctorResults.set(action.playerId, { success: false })
+          doctorResults.set(a.playerId, { success: false })
         }
       })
 
-    // 4) Bomba, Survivor, Watch/Detective vs.
+    // 4) Bombalar / Survivor korumaları vs.
     const bombPlacers = nightActions.filter(
       (a) => a.actionType === "BOMB_PLANT" && !blockedPlayers.has(a.playerId),
     )
-    const detonateAction = nightActions.find(
+    const detonateActionIndex = nightActions.findIndex(
       (a) => a.actionType === "BOMB_DETONATE" && !blockedPlayers.has(a.playerId),
     )
 
@@ -217,12 +305,12 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     const protectedPlayers = new Set<string>()
     const survivorActors = new Set<string>()
-    let detonateIndex = -1
 
     const updatedActions: NightAction[] = nightActions.map((action, idx) => {
       const actor = players.find((p) => p.id === action.playerId)
       const target = action.targetId ? players.find((p) => p.id === action.targetId) : null
       let result: any = null
+
       if (!actor) return { ...action }
 
       if (blockedPlayers.has(actor.id)) {
@@ -241,9 +329,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           }
         } else if (actor.role === "DOCTOR") {
           const docResult = doctorResults.get(actor.id)
-          if (docResult) {
-            result = { type: "REVIVE", success: docResult.success }
-          }
+          if (docResult) result = { type: "REVIVE", success: docResult.success }
         } else if (action.targetId) {
           protectedPlayers.add(action.targetId)
           result = { type: "PROTECT" }
@@ -280,9 +366,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           } else if (["DETECTIVE", "EVIL_DETECTIVE"].includes(actor.role!)) {
             const roles: PlayerRole[] = ["DOCTOR", "GUARDIAN", "WATCHER", "DETECTIVE", "BOMBER", "SURVIVOR"]
             const actualRole = target.role
-            const fakeRole = roles.filter((r) => r !== actualRole)[
-              Math.floor(Math.random() * (roles.length - 1))
-            ]
+            const fakeRole = roles.filter((r) => r !== actualRole)[Math.floor(Math.random() * (roles.length - 1))]
             const shown = [actualRole, fakeRole].sort(() => Math.random() - 0.5)
             result = { type: "DETECT", roles: [shown[0], shown[1]] }
           }
@@ -291,8 +375,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
       if (action.actionType === "BOMB_PLANT") {
         result = { type: "BOMB_PLANT" }
-      } else if (action.actionType === "BOMB_DETONATE") {
-        detonateIndex = idx
       }
 
       if (result) {
@@ -318,8 +400,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
             break
           case "WATCH":
             if (target) {
-              const visitorsText =
-                result.visitors && result.visitors.length > 0 ? result.visitors.join(", ") : "kimse gelmedi"
+              const visitorsText = result.visitors && result.visitors.length > 0 ? result.visitors.join(", ") : "kimse gelmedi"
               note = `${prefix} ${target.name} oyuncusunu izledin: ${visitorsText}`
             }
             break
@@ -340,23 +421,18 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       return { ...action, result }
     })
 
-    // 5) Bombalar patlarsa
+    // 5) Patlatma
     let bombVictims: Player[] = []
-    if (detonateAction) {
+    if (detonateActionIndex !== -1) {
       bombVictims = players.filter((p) => newBombTargets.includes(p.id) && p.isAlive)
       const victimNames = bombVictims.map((p) => p.name)
-      const idx = updatedActions.findIndex(
-        (a) => a.actionType === "BOMB_DETONATE" && !blockedPlayers.has(a.playerId),
-      )
-      if (idx >= 0) {
-        updatedActions[idx] = {
-          ...updatedActions[idx],
-          result: { type: "BOMB_DETONATE", victims: victimNames },
-        }
-        const actorId = updatedActions[idx].playerId
-        const victimsText = victimNames.length > 0 ? victimNames.join(", ") : "kimse ölmedi"
-        addPlayerNote(actorId, `${currentTurn}. Gece: bombaları patlattın: ${victimsText}`)
+      updatedActions[detonateActionIndex] = {
+        ...updatedActions[detonateActionIndex],
+        result: { type: "BOMB_DETONATE", victims: victimNames },
       }
+      const actorId = updatedActions[detonateActionIndex].playerId
+      const victimsText = victimNames.length > 0 ? victimNames.join(", ") : "kimse ölmedi"
+      addPlayerNote(actorId, `${currentTurn}. Gece: bombaları patlattın: ${victimsText}`)
       newBombTargets = []
     }
 
@@ -365,47 +441,47 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     const newDeaths: Player[] = []
 
-    setPlayers((prev) =>
-      prev.map((player) => {
-        const updated: Player = { ...player, hasShield: false }
+    setPlayers((prevPlayers) =>
+      prevPlayers.map((player) => {
+        const updatedPlayer: Player = { ...player, hasShield: false }
 
         if (protectedPlayers.has(player.id)) {
-          updated.hasShield = true
+          updatedPlayer.hasShield = true
         }
 
         if (survivorActors.has(player.id)) {
-          updated.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
+          updatedPlayer.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
         }
 
         if (revivedPlayers.has(player.id)) {
-          updated.isAlive = true
+          updatedPlayer.isAlive = true
         }
 
         if (bombVictimIds.includes(player.id) && !revivedPlayers.has(player.id)) {
-          updated.isAlive = false
-          newDeaths.push(updated)
+          updatedPlayer.isAlive = false
+          newDeaths.push(updatedPlayer)
         } else if (
           targetedPlayers.includes(player.id) &&
           !protectedPlayers.has(player.id) &&
           !revivedPlayers.has(player.id)
         ) {
-          updated.isAlive = false
-          newDeaths.push(updated)
+          updatedPlayer.isAlive = false
+          newDeaths.push(updatedPlayer)
         }
 
-        return updated
+        return updatedPlayer
       }),
     )
 
     newBombTargets = newBombTargets.filter((id) => !newDeaths.some((p) => p.id === id))
     setBombTargets(newBombTargets)
 
-    // 6) Saldırı notları
+    // Saldırı notları
     nightActions
       .filter((a) => a.actionType === "KILL")
-      .forEach((action) => {
-        const actor = players.find((p) => p.id === action.playerId)
-        const target = players.find((p) => p.id === action.targetId)
+      .forEach((a) => {
+        const actor = players.find((p) => p.id === a.playerId)
+        const target = players.find((p) => p.id === a.targetId)
         if (actor && target) {
           const killed = newDeaths.some((d) => d.id === target.id)
           const note = `${currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? " ve öldürdün" : ""}`
@@ -418,19 +494,12 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     if (newDeaths.length > 0) {
       setDeathLog((prev) => [...prev, ...newDeaths])
     }
-  }, [isGameOwner, nightActions, players, bombTargets, currentTurn, addPlayerNote])
+  }, [nightActions, players, bombTargets, currentTurn, addPlayerNote])
 
-  /** ----------------- OWNER-ONLY: Oyları say ----------------- */
+  // ---- OYLAMA ----
   const processVotes = useCallback(() => {
-    if (!isGameOwner) return
-
     const voteCount: Record<string, number> = {}
-    players
-      .filter((p) => p.isAlive)
-      .forEach((p) => {
-        // init 0
-        voteCount[p.id] = voteCount[p.id] || 0
-      })
+    const alivePlayers = players.filter((p) => p.isAlive)
 
     Object.entries(votes).forEach(([voterId, targetId]) => {
       const voter = players.find((p) => p.id === voterId)
@@ -441,6 +510,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     let maxVotes = 0
     let eliminatedPlayerId: string | null = null
+
     const entries = Object.entries(voteCount)
     entries.forEach(([playerId, count]) => {
       if (count > maxVotes) {
@@ -473,58 +543,30 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     if (newDeaths.length > 0) {
       setDeathLog((prev) => [...prev, ...newDeaths])
     }
-  }, [isGameOwner, votes, players])
+  }, [votes, players])
 
-  /** ----------------- Faz İlerle (OWNER hesaplar + yayınlar) ----------------- */
-  const advancePhase = useCallback(() => {
-    if (!isGameOwner) return // non-owner faz ilerletmez
-
-    const publishPhase = (phase: GamePhase, extra: Record<string, any> = {}) => {
-      wsClient.sendEvent("PHASE_CHANGED" as WSEvent, {
-        phase,
-        timeRemaining: extra.timeRemaining ?? timeRemaining,
-        currentTurn: extra.currentTurn ?? currentTurn,
-        selectedCardDrawers: extra.selectedCardDrawers ?? selectedCardDrawers,
-        currentCardDrawer: extra.currentCardDrawer ?? currentCardDrawer,
-        initiatorId: currentPlayerId,
-      })
-    }
-
-    const publishSnapshot = () => {
-      wsClient.sendEvent("STATE_SNAPSHOT" as WSEvent, {
-        players,
-        deathLog,
-        playerNotes,
-        votes,
-        bombTargets,
-        currentPhase,
-        timeRemaining,
-        currentTurn,
-        selectedCardDrawers,
-        currentCardDrawer,
-        initiatorId: currentPlayerId,
-      })
-    }
-
+  // ---- PHASE ADVANCE (owner authoritative) ----
+  const _advancePhase = useCallback(() => {
     const { winner, gameEnded } = getWinCondition(players)
+
     if (gameEnded) {
-      setGame((prev) =>
-        prev ? { ...prev, phase: "END", winningSide: winner as any, endedAt: new Date() } : null,
-      )
+      setGame((prev) => (prev ? { ...prev, phase: "END", winningSide: winner as any, endedAt: new Date() } : null))
       setCurrentPhase("END")
       setTimeRemaining(0)
-      publishPhase("END", { timeRemaining: 0 })
+      // Opsiyonel: snapshot yayınla
       publishSnapshot()
       return
     }
 
     switch (currentPhase) {
       case "ROLE_REVEAL": {
-        const t = game?.settings.nightDuration || 15
         setCurrentPhase("NIGHT")
-        setTimeRemaining(t)
-        publishPhase("NIGHT", { timeRemaining: t })
-        publishSnapshot()
+        const tr = game?.settings.nightDuration || 15
+        setTimeRemaining(tr)
+        // Publish phase (opsiyonel)
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT", timeRemaining: tr, currentTurn })
+        }
         break
       }
 
@@ -532,8 +574,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         processNightActions()
         setCurrentPhase("NIGHT_RESULTS")
         setTimeRemaining(5)
-        publishPhase("NIGHT_RESULTS", { timeRemaining: 5 })
-        publishSnapshot()
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT_RESULTS", timeRemaining: 5, currentTurn })
+        }
         break
       }
 
@@ -542,8 +585,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         setCurrentPhase("DEATH_ANNOUNCEMENT")
         setTimeRemaining(5)
         setNightActions([])
-        publishPhase("DEATH_ANNOUNCEMENT", { timeRemaining: 5 })
-        publishSnapshot()
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DEATH_ANNOUNCEMENT", timeRemaining: 5, currentTurn })
+          publishSnapshot()
+        }
         break
       }
 
@@ -557,42 +602,46 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         if (cardDrawers.length > 0) {
           setCurrentPhase("CARD_DRAWING")
           setTimeRemaining(0)
-          publishPhase("CARD_DRAWING", { timeRemaining: 0, selectedCardDrawers: cardDrawers.map((p) => p.id), currentCardDrawer: cardDrawers[0]?.id || null })
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "CARD_DRAWING", timeRemaining: 0, currentTurn })
+          }
         } else {
-          const t = game?.settings.dayDuration || 15
           setCurrentPhase("DAY_DISCUSSION")
-          setTimeRemaining(t)
-          publishPhase("DAY_DISCUSSION", { timeRemaining: t })
+          const tr = game?.settings.dayDuration || 15
+          setTimeRemaining(tr)
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DAY_DISCUSSION", timeRemaining: tr, currentTurn })
+          }
         }
-        publishSnapshot()
         break
       }
 
       case "CARD_DRAWING": {
-        const currentIndex = selectedCardDrawers.indexOf(currentCardDrawer || "")
-        if (currentIndex < selectedCardDrawers.length - 1) {
-          const nextId = selectedCardDrawers[currentIndex + 1]
-          setCurrentCardDrawer(nextId)
+        const idx = selectedCardDrawers.indexOf(currentCardDrawer || "")
+        if (idx < selectedCardDrawers.length - 1) {
+          setCurrentCardDrawer(selectedCardDrawers[idx + 1])
           setTimeRemaining(0)
-          publishPhase("CARD_DRAWING", { timeRemaining: 0, currentCardDrawer: nextId })
+          // faz aynı kalır
         } else {
-          const t = game?.settings.dayDuration || 15
           setCurrentPhase("DAY_DISCUSSION")
-          setTimeRemaining(t)
+          const tr = game?.settings.dayDuration || 15
+          setTimeRemaining(tr)
           setSelectedCardDrawers([])
           setCurrentCardDrawer(null)
-          publishPhase("DAY_DISCUSSION", { timeRemaining: t, selectedCardDrawers: [], currentCardDrawer: null })
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DAY_DISCUSSION", timeRemaining: tr, currentTurn })
+          }
         }
-        publishSnapshot()
         break
       }
 
       case "DAY_DISCUSSION": {
-        const t = game?.settings.voteDuration || 15
         setCurrentPhase("VOTE")
-        setTimeRemaining(t)
-        publishPhase("VOTE", { timeRemaining: t })
-        publishSnapshot()
+        const tr = game?.settings.voteDuration || 15
+        setTimeRemaining(tr)
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "VOTE", timeRemaining: tr, currentTurn })
+        }
         break
       }
 
@@ -600,8 +649,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         processVotes()
         setCurrentPhase("RESOLVE")
         setTimeRemaining(3)
-        publishPhase("RESOLVE", { timeRemaining: 3 })
-        publishSnapshot()
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "RESOLVE", timeRemaining: 3, currentTurn })
+          publishSnapshot()
+        }
         break
       }
 
@@ -613,17 +664,22 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           )
           setCurrentPhase("END")
           setTimeRemaining(0)
-          publishPhase("END", { timeRemaining: 0 })
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "END", timeRemaining: 0, currentTurn })
+            publishSnapshot()
+          }
         } else {
-          const t = game?.settings.nightDuration || 15
           setCurrentTurn((prev) => prev + 1)
           setCurrentPhase("NIGHT")
-          setTimeRemaining(t)
+          const tr = game?.settings.nightDuration || 15
+          setTimeRemaining(tr)
           setDeathsThisTurn([])
           setVotes({})
-          publishPhase("NIGHT", { timeRemaining: t, currentTurn: currentTurn + 1 })
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT", timeRemaining: tr, currentTurn: currentTurn + 1 })
+            publishSnapshot()
+          }
         }
-        publishSnapshot()
         break
       }
 
@@ -631,36 +687,23 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         break
     }
   }, [
-    isGameOwner,
-    game,
     players,
     currentPhase,
-    timeRemaining,
+    game,
     currentTurn,
-    votes,
-    selectedCardDrawers,
-    currentCardDrawer,
-    deathLog,
-    playerNotes,
-    bombTargets,
     processNightActions,
-    processVotes,
-    currentPlayerId,
+    isGameOwner,
+    publishSnapshot,
   ])
 
-  /** TDZ koruması: advancePhase’i ref ile hoist et */
+  // TDZ koruması: advancePhase’i ref üstünden çağıracağız
   const advancePhaseRef = useRef<() => void>(() => {})
   useEffect(() => {
-    advancePhaseRef.current = advancePhase
-  }, [advancePhase])
-  function handlePhaseTimeout() {
-    if (isGameOwner) {
-      // fazı sadece OWNER ilerletir
-      advancePhaseRef.current()
-    }
-  }
+    advancePhaseRef.current = _advancePhase
+  }, [_advancePhase])
+  const advancePhase = useCallback(() => advancePhaseRef.current(), [])
 
-  /** --------- Aksiyon gönderimleri (oyuncular) --------- */
+  // ---- NIGHT ACTION & VOTE API ----
   const submitNightAction = useCallback(
     (
       playerId: string,
@@ -669,27 +712,15 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     ) => {
       const actor = players.find((p) => p.id === playerId)
       if (!actor || !actor.isAlive) return
-
       const newAction: NightAction = {
         playerId,
         targetId,
         actionType,
         timestamp: new Date(),
       }
-
-      // Kendi ekranda anında gör (özellikle non-owner için UX)
-      setNightActions((prev) => [
-        ...prev.filter((a) => a.playerId !== playerId),
-        newAction,
-      ])
-
-      // Owner tüm aksiyonları toplar (server sadece broadcast yapıyor)
-      wsClient.sendEvent("NIGHT_ACTION_UPDATED" as WSEvent, {
-        action: newAction,
-        initiatorId: currentPlayerId,
-      })
+      setNightActions((prev) => [...prev.filter((a) => a.playerId !== playerId), newAction])
     },
-    [players, currentPlayerId],
+    [players],
   )
 
   const submitVote = useCallback(
@@ -700,22 +731,16 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       setVotes((prev) => {
         const newVotes = { ...prev, [voterId]: targetId }
         const aliveCount = players.filter((p) => p.isAlive).length
-        if (Object.keys(newVotes).length >= aliveCount && isGameOwner) {
-          // OWNER erken kapatabilir
+        if (Object.keys(newVotes).length >= aliveCount) {
           setTimeRemaining(0)
         }
         return newVotes
       })
-
-      wsClient.sendEvent("VOTE_CAST" as WSEvent, {
-        voterId,
-        targetId,
-        initiatorId: currentPlayerId,
-      })
     },
-    [players, isGameOwner, currentPlayerId],
+    [players],
   )
 
+  // ---- RESET ----
   const resetGame = useCallback(() => {
     setGame(null)
     setPlayers([])
@@ -732,137 +757,29 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setPlayerNotes({})
   }, [])
 
-  /** ----------------- WS Dinleyicileri (herkes) ----------------- */
+  // ---- TIMER (owner authoritative) ----
   useEffect(() => {
-    /** GAME_STARTED: Owner rolleri dağıttı → herkese geldi */
-    const onGameStarted = (data: any) => {
-      const { players: payloadPlayers, settings, initiatorId } = data?.payload || {}
-      if (!payloadPlayers || !settings) return
-
-      // Owner zaten set etti, kendini tekrar kurmasın
-      if (initiatorId && initiatorId === currentPlayerId) return
-
-      const newGame: Game = {
-        id: Math.random().toString(36).substring(2, 15),
-        roomId: Math.random().toString(36).substring(2, 15),
-        phase: "ROLE_REVEAL",
-        currentTurn: 1,
-        settings,
-        seed: Math.random().toString(36).substring(2, 15),
-        startedAt: new Date(),
-      }
-      setGame(newGame)
-      setPlayers(payloadPlayers) // DİKKAT: assignRoles yok!
-      setCurrentPhase("ROLE_REVEAL")
-      setTimeRemaining(15)
-      setCurrentTurn(1)
-      setNightActions([])
-      setVotes({})
-      setSelectedCardDrawers([])
-      setCurrentCardDrawer(null)
-      setDeathsThisTurn([])
-      setDeathLog([])
-      setBombTargets([])
-      setPlayerNotes({})
-    }
-
-    /** PHASE_CHANGED: herkes faz/timer eşitlesin */
-    const onPhaseChanged = (data: any) => {
-      const { phase, timeRemaining: t, currentTurn: ct, selectedCardDrawers: sel, currentCardDrawer: curr, initiatorId } =
-        data?.payload || {}
-      if (initiatorId && initiatorId === currentPlayerId) return
-      if (phase) setCurrentPhase(phase)
-      if (typeof t === "number") setTimeRemaining(t)
-      if (typeof ct === "number") setCurrentTurn(ct)
-      if (Array.isArray(sel)) setSelectedCardDrawers(sel)
-      setCurrentCardDrawer(curr ?? null)
-    }
-
-    /** STATE_SNAPSHOT: owner’ın authoritative state’i */
-    const onSnapshot = (data: any) => {
-      const p = data?.payload
-      if (!p) return
-      if (p.initiatorId && p.initiatorId === currentPlayerId) return
-
-      if (Array.isArray(p.players)) setPlayers(p.players)
-      if (Array.isArray(p.deathLog)) setDeathLog(p.deathLog)
-      if (p.playerNotes) setPlayerNotes(p.playerNotes)
-      if (p.votes) setVotes(p.votes)
-      if (Array.isArray(p.bombTargets)) setBombTargets(p.bombTargets)
-      if (p.currentPhase) setCurrentPhase(p.currentPhase)
-      if (typeof p.timeRemaining === "number") setTimeRemaining(p.timeRemaining)
-      if (typeof p.currentTurn === "number") setCurrentTurn(p.currentTurn)
-      if (Array.isArray(p.selectedCardDrawers)) setSelectedCardDrawers(p.selectedCardDrawers)
-      setCurrentCardDrawer(p.currentCardDrawer ?? null)
-    }
-
-    /** NIGHT_ACTION_UPDATED: owner aksiyonu toplar */
-    const onNightAction = (data: any) => {
-      const { action, initiatorId } = data?.payload || {}
-      if (!action) return
-
-      // OWNER: herkesten gelen aksiyonları biriktir
-      if (isGameOwner) {
-        setNightActions((prev) => [
-          ...prev.filter((a) => a.playerId !== action.playerId),
-          action,
-        ])
-      } else {
-        // Non-owner için bir şey yapmaya gerek yok (kendi aksiyonunu zaten lokalde set etti)
-        // istersen UI senkronu için de gösterebilirsin ama authoritative değil
-      }
-    }
-
-    /** VOTE_CAST: owner oyları toplar */
-    const onVoteCast = (data: any) => {
-      const { voterId, targetId, initiatorId } = data?.payload || {}
-      if (!voterId) return
-
-      // OWNER oyları authoritative olarak toplar
-      if (isGameOwner) {
-        setVotes((prev) => ({ ...prev, [voterId]: targetId }))
-      } else {
-        // Non-owner tarafında da UI için gösterebiliriz (opsiyonel)
-        setVotes((prev) => ({ ...prev, [voterId]: targetId }))
-      }
-    }
-
-    wsClient.on("GAME_STARTED", onGameStarted)
-    wsClient.on("PHASE_CHANGED", onPhaseChanged)
-    wsClient.on("STATE_SNAPSHOT", onSnapshot)
-    wsClient.on("NIGHT_ACTION_UPDATED", onNightAction)
-    wsClient.on("VOTE_CAST", onVoteCast)
-
-    return () => {
-      wsClient.off("GAME_STARTED", onGameStarted)
-      wsClient.off("PHASE_CHANGED", onPhaseChanged)
-      wsClient.off("STATE_SNAPSHOT", onSnapshot)
-      wsClient.off("NIGHT_ACTION_UPDATED", onNightAction)
-      wsClient.off("VOTE_CAST", onVoteCast)
-    }
-  }, [currentPlayerId, isGameOwner])
-
-  /** ----------------- Zamanlayıcı (owner auto-advance) ----------------- */
-  useEffect(() => {
+    // Herkes kalan süreyi görsün diye local countdown var;
+    // ancak faz ilerletmeyi SADECE OWNER yapar.
     if (timeRemaining > 0) {
-      const timer = setTimeout(() => {
-        setTimeRemaining((prev) => prev - 1)
-      }, 1000)
-      return () => clearTimeout(timer)
+      const t = setTimeout(() => setTimeRemaining((s) => s - 1), 1000)
+      return () => clearTimeout(t)
     }
-    // Faz otomatik ilerlemesini SADECE OWNER yapar
+
     if (
-      isGameOwner &&
       timeRemaining === 0 &&
       currentPhase !== "LOBBY" &&
       currentPhase !== "END" &&
       currentPhase !== "CARD_DRAWING"
     ) {
-      const t = setTimeout(handlePhaseTimeout, 120) // küçük gecikme
-      return () => clearTimeout(t)
+      if (isGameOwner) {
+        const t = setTimeout(() => advancePhaseRef.current(), 120)
+        return () => clearTimeout(t)
+      }
     }
   }, [timeRemaining, currentPhase, isGameOwner])
 
+  // ---- RETURN ----
   return {
     game,
     players,
