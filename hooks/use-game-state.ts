@@ -112,7 +112,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   if (typeof s.phaseEndsAt === 'number') setPhaseEndsAt(s.phaseEndsAt);
   if (typeof s.currentTurn === 'number') setCurrentTurn(s.currentTurn);
   if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
-  if (s.votes) setVotes(s.votes);
+  if (s.votes && typeof s.votes === "object") {
+  setVotes((prev) => ({ ...prev, ...s.votes }));  // 🔥 eskileri silmeden güncelle
+}
   if (Array.isArray(s.deathsThisTurn)) setDeathsThisTurn(s.deathsThisTurn);
   if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
   if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
@@ -128,8 +130,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     };
 
     const onVotes = (evt: any) => {
-      if (evt?.payload?.votes) setVotes(evt.payload.votes);
-    };
+  if (evt?.payload?.votes && typeof evt.payload.votes === "object") {
+    setVotes((prev) => ({ ...prev, ...evt.payload.votes })); // 🔥 merge
+  }
+};
 
     const onNotes = (evt: any) => {
       if (evt?.payload?.playerNotes) setPlayerNotes(evt.payload.playerNotes);
