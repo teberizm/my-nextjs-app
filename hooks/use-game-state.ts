@@ -123,35 +123,35 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
   // ----- Oyunu başlat (yalnız owner çağırır) -----
   const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
-    if (!gamePlayers || gamePlayers.length === 0) return
+  if (!gamePlayers || gamePlayers.length === 0) return
 
-    if (isGameOwner) {
-      // Roller tek kaynak: Sadece owner dağıtır ve WS ile herkese yollar
-      const playersWithRoles = assignRoles(gamePlayers, settings)
+  // 🔴 ÖNEMLİ: Owner tespitini parametreden yap
+  const amOwner = !!gamePlayers.find(p => p.id === currentPlayerId && p.isOwner)
 
-      // Local state’i de aynı paketle doldur (ekran gecikmesiz)
-      const newGame: Game = {
-        id: Math.random().toString(36).slice(2),
-        roomId: Math.random().toString(36).slice(2),
-        phase: "ROLE_REVEAL",
-        currentTurn: 1,
-        settings,
-        seed: Math.random().toString(36).slice(2),
-        startedAt: new Date(),
-      }
-      setGame(newGame)
-      setPlayers(playersWithRoles)
-      setCurrentPhase("ROLE_REVEAL")
-      // phaseEndsAt server'dan gelecek; burada set etmiyoruz
+  if (amOwner) {
+    const playersWithRoles = assignRoles(gamePlayers, settings)
 
-      // Herkese yayın: server bu payload’ı olduğu gibi yayınlıyor
-      wsClient.sendEvent("GAME_STARTED" as any, {
-        settings,
-        players: playersWithRoles,
-      })
+    const newGame: Game = {
+      id: Math.random().toString(36).slice(2),
+      roomId: Math.random().toString(36).slice(2),
+      phase: "ROLE_REVEAL",
+      currentTurn: 1,
+      settings,
+      seed: Math.random().toString(36).slice(2),
+      startedAt: new Date(),
     }
-    // Owner olmayanlar herhangi bir şey yapmaz; GAME_STARTED’ı bekler
-  }, [isGameOwner])
+    setGame(newGame)
+    setPlayers(playersWithRoles)
+    setCurrentPhase("ROLE_REVEAL")
+
+    // Sunucuya roller + ayarlar gönder (authoritative başlatma)
+    wsClient.sendEvent("GAME_STARTED" as any, {
+      settings,
+      players: playersWithRoles,
+    })
+  }
+  // Owner olmayanlar pasif; GAME_STARTED/PHASE_CHANGED bekler
+}, [currentPlayerId])
 
   // ----- Fazı manuel ilerlet (artık server otoritesi; minimal tut) -----
   const advancePhase = useCallback(() => {
