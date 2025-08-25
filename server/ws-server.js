@@ -474,7 +474,7 @@ function advancePhase(roomId) {
       S.currentTurn = (S.currentTurn || 1) + 1;
       startPhase(roomId, 'NIGHT', settings.nightDuration);
       break;
-
+    
     default:
       break;
   }
@@ -563,7 +563,20 @@ wss.on('connection', (ws) => {
         });
         break;
       }
-
+      case 'STATE_SNAPSHOT': {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const message = JSON.stringify({ type: 'STATE_SNAPSHOT', payload });
+  room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(message));
+  break;
+}
+case 'PHASE_CHANGED': {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const message = JSON.stringify({ type: 'PHASE_CHANGED', payload });
+  room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(message));
+  break;
+}
       case 'GAME_STARTED': {
         const room = rooms.get(rid);
         if (!room) return;
@@ -639,7 +652,7 @@ wss.on('connection', (ws) => {
         broadcastSnapshot(rid);
         break;
       }
-
+      
       default:
         break;
     }
