@@ -78,47 +78,48 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     };
 
     const onPhaseChanged = (evt: any) => {
-      const {
-        phase,
-        phaseEndsAt,
-        turn,
-        selectedCardDrawers,
-        currentCardDrawer,
-      } = evt?.payload || {};
-      if (phase) setCurrentPhase(phase);
-      if (typeof phaseEndsAt === "number") setPhaseEndsAt(phaseEndsAt);
-      if (typeof turn === "number") setCurrentTurn(turn);
-      if (Array.isArray(selectedCardDrawers))
-        setSelectedCardDrawers(selectedCardDrawers);
-      if (
-        typeof currentCardDrawer === "string" ||
-        currentCardDrawer === null
-      ) {
-        setCurrentCardDrawer(currentCardDrawer ?? null);
-      }
-    };
+  console.log('[client] PHASE_CHANGED', evt?.payload);
+  const { phase, phaseEndsAt, turn, selectedCardDrawers, currentCardDrawer } = evt?.payload || {};
+  if (phase) setCurrentPhase(phase);
+  if (typeof phaseEndsAt === "number") setPhaseEndsAt(phaseEndsAt);
+  if (typeof turn === "number") setCurrentTurn(turn);
+  if (Array.isArray(selectedCardDrawers)) setSelectedCardDrawers(selectedCardDrawers);
+  if (typeof currentCardDrawer === "string" || currentCardDrawer === null)
+    setCurrentCardDrawer(currentCardDrawer ?? null);
+};
 
     const onSnapshot = (evt: any) => {
-      // Beklenen format: { type:"STATE_SNAPSHOT", payload:{ state: {...} } }
-      const s = evt?.payload?.state;
-      if (!s) return;
+  // bazı server’lar {payload: {...state}} gönderiyor, bazıları {payload:{state:{...}}}
+  const raw = evt?.payload;
+  const s = raw?.state ?? raw;
 
-      if (Array.isArray(s.players)) setPlayers(s.players);
-      if (s.phase) setCurrentPhase(s.phase as GamePhase);
-      if (typeof s.phaseEndsAt === "number") setPhaseEndsAt(s.phaseEndsAt);
-      if (typeof s.currentTurn === "number") setCurrentTurn(s.currentTurn);
-      if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
-      if (s.votes) setVotes(s.votes);
-      if (Array.isArray(s.deathsThisTurn)) setDeathsThisTurn(s.deathsThisTurn);
-      if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
-      if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
-      if (s.playerNotes) setPlayerNotes(s.playerNotes);
-      if (Array.isArray(s.selectedCardDrawers))
-        setSelectedCardDrawers(s.selectedCardDrawers);
-      if ("currentCardDrawer" in s)
-        setCurrentCardDrawer(s.currentCardDrawer ?? null);
-      if (s.game) setGame(s.game as Game);
-    };
+  console.log('[client] STATE_SNAPSHOT received', s);
+  if (!s) return;
+
+  // tarihleri geri Date yapalım
+  const reviveDate = (v: any) => (typeof v === 'string' ? new Date(v) : v);
+
+  if (s.game) {
+    setGame({
+      ...s.game,
+      startedAt: reviveDate(s.game.startedAt),
+      endedAt: reviveDate(s.game.endedAt),
+    } as Game);
+  }
+
+  if (Array.isArray(s.players)) setPlayers(s.players);
+  if (s.phase) setCurrentPhase(s.phase as GamePhase);
+  if (typeof s.phaseEndsAt === 'number') setPhaseEndsAt(s.phaseEndsAt);
+  if (typeof s.currentTurn === 'number') setCurrentTurn(s.currentTurn);
+  if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
+  if (s.votes) setVotes(s.votes);
+  if (Array.isArray(s.deathsThisTurn)) setDeathsThisTurn(s.deathsThisTurn);
+  if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
+  if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
+  if (s.playerNotes) setPlayerNotes(s.playerNotes);
+  if (Array.isArray(s.selectedCardDrawers)) setSelectedCardDrawers(s.selectedCardDrawers);
+  if ('currentCardDrawer' in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
+};
 
     const onNightActions = (evt: any) => {
       if (Array.isArray(evt?.payload?.actions)) {
@@ -167,6 +168,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
+    console.log('[timer] phaseEndsAt ->', new Date(phaseEndsAt).toISOString());
   }, [phaseEndsAt]);
 
   // ---- owner: oyunu başlat (server’a authoritative event gönder)
@@ -194,7 +196,38 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       setGame(newGame);
       setPlayers(playersWithRoles);
       setCurrentPhase("ROLE_REVEAL");
+      console.log('[owner] startGame -> broadcasting initial STATE_SNAPSHOT + PHASE_CHANGED');
 
+// authoritative snapshot (herkes aynı şeyi görsün)
+  const phase = 'ROLE_REVEAL';
+  const phaseEndsAt = Date.now() + 15_000;
+
+  const snapshot = {
+  game: {
+    ...newGame,
+    // tarihleri düz string olsun: diğer client’lar Date’e çevirir
+    startedAt: newGame.startedAt.toISOString(),
+  },
+  players: playersWithRoles,
+  phase,
+  phaseEndsAt,
+  currentTurn: 1,
+  nightActions: [],
+  votes: {},
+  deathsThisTurn: [],
+  deathLog: [],
+  bombTargets: [],
+  playerNotes: {},
+  selectedCardDrawers: [],
+  currentCardDrawer: null,
+};
+
+// bazı kurulumlarda server payload’ı “direkt state” bekliyor;
+// biz payload.state ile gönderiyoruz (daha derli toplu).
+      wsClient.sendEvent('STATE_SNAPSHOT' as any, { state: snapshot });
+      wsClient.sendEvent('PHASE_CHANGED' as any, { phase, phaseEndsAt, turn: 1 });
+
+      console.log('[owner] sent STATE_SNAPSHOT & PHASE_CHANGED', snapshot);
       // authoritative broadcast -> server tüm odaya yayacak
       wsClient.sendEvent("GAME_STARTED" as any, {
         settings,
