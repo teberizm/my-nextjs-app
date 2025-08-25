@@ -132,19 +132,10 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   // 3) Lobideki buton aksiyonları
   // -----------------------------
   const handleStartGame = () => {
-    // Buton sadece owner’a gösteriliyor; 4+ kişi şartını RoomLobby kontrol ediyor.
-    if (gamePhase !== "LOBBY") return;
-
-    // Server’a otoritatif başlat komutu (owner) — roller server’ca dağıtılacak
-    wsClient.sendEvent("GAME_STARTED" as any, {
-      players: currentRoom.players,
-      settings: gameSettings,
-    });
-
-    // UI’yi bekletmeyelim, ROLE_REVEAL’e geçsin; sunucudan PHASE_CHANGED/SNAPSHOT
-    // geldiğinde zaten senkron kalır.
-    setGamePhase("ROLE_REVEAL");
-  };
+  if (gamePhase !== "LOBBY") return;
+  wsClient.sendEvent("GAME_STARTED" as any, { ping: Date.now() }); // sadece tetik
+  setGamePhase("ROLE_REVEAL"); // UI geçişi
+};
 
   const handleKickPlayer = (playerId: string) => {
     wsClient.sendEvent("KICK_PLAYER", { playerId });
