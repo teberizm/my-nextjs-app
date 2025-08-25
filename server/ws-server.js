@@ -1,4 +1,3 @@
-// ws-server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -17,7 +16,6 @@ function broadcastToRoom(roomId, dataObj) {
   if (!room) return;
   const message = JSON.stringify({
     ...dataObj,
-    // odada yayınladığımız tüm mesajlara roomId'yi ekleyelim
     roomId,
   });
   room.sockets.forEach((client) => {
@@ -43,7 +41,7 @@ function broadcastPlayerList(roomId, options = {}) {
 
 /* -------------------- Connection -------------------- */
 wss.on('connection', function connection(ws) {
-  // Heartbeat işaretleyicisi
+  // Heartbeat
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
@@ -57,7 +55,6 @@ wss.on('connection', function connection(ws) {
     }
 
     const { type, payload, roomId, playerId } = data || {};
-    // Gelen roomId yoksa ws.roomId'yi kullanacağız (JOIN sonrası dolu olur)
     const effectiveRoomId = roomId || ws.roomId;
 
     switch (type) {
@@ -80,7 +77,6 @@ wss.on('connection', function connection(ws) {
         room.sockets.add(ws);
 
         ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
-
         broadcastPlayerList(joinRoomId, { newPlayer: player });
         break;
       }
@@ -98,7 +94,6 @@ wss.on('connection', function connection(ws) {
 
         if (targetSocket) {
           targetSocket.send(JSON.stringify({ type: 'PLAYER_KICKED', payload: { playerId: targetId } }));
-          // Bağlantıyı kapat
           try { targetSocket.close(); } catch (_) {}
         }
 
@@ -108,23 +103,32 @@ wss.on('connection', function connection(ws) {
       }
 
       case 'GAME_STARTED': {
-  // ÖNEMLİ: mesajdaki roomId yerine, soketin zaten bağlı olduğu odayı kullan
-  const targetRoomId = ws.roomId || roomId;
-  const room = rooms.get(targetRoomId);
-  if (!room) return;
+        // Mesajdaki roomId yerine bağlandığı odayı kullan
+        const targetRoomId = ws.roomId || roomId;
+        const room = rooms.get(targetRoomId);
+        if (!room) return;
 
-  const message = JSON.stringify({ type: 'GAME_STARTED', payload });
-  room.sockets.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
-  });
-  break;
-}
+        const message = JSON.stringify({ type: 'GAME_STARTED', payload });
+        room.sockets.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(message);
+          }
+        });
+        break;
+      }
+
+      case 'STATE_SNAPSHOT': {
+        if (!effectiveRoomId) return;
+        // OWNER’ın gönderdiği otoritatif state (roller, faz, süre vs.)
+        broadcastToRoom(effectiveRoomId, {
+          type: 'STATE_SNAPSHOT',
+          payload,
+        });
+        break;
+      }
 
       case 'PHASE_CHANGED': {
         if (!effectiveRoomId) return;
-        // Faz değişimi yayını (initiatorId, turn vb. olabilir)
         broadcastToRoom(effectiveRoomId, {
           type: 'PHASE_CHANGED',
           payload,
@@ -134,7 +138,6 @@ wss.on('connection', function connection(ws) {
 
       case 'VOTE_CAST': {
         if (!effectiveRoomId) return;
-        // Oy güncellemesi yayını (votes objesi)
         broadcastToRoom(effectiveRoomId, {
           type: 'VOTE_CAST',
           payload,
@@ -144,7 +147,6 @@ wss.on('connection', function connection(ws) {
 
       case 'NIGHT_ACTION_UPDATED': {
         if (!effectiveRoomId) return;
-        // Gece aksiyonları yayını (nightActions array)
         broadcastToRoom(effectiveRoomId, {
           type: 'NIGHT_ACTION_UPDATED',
           payload,
@@ -153,8 +155,7 @@ wss.on('connection', function connection(ws) {
       }
 
       default: {
-        // Unknown events are ignored
-        // Dilersen loglayabilirsin: console.log('Unknown type:', type)
+        // Unknown events → ignore
         break;
       }
     }
@@ -182,7 +183,7 @@ wss.on('connection', function connection(ws) {
   });
 });
 
-/* -------------------- Heartbeat (opsiyonel ama önerilir) -------------------- */
+/* -------------------- Heartbeat -------------------- */
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
