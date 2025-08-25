@@ -287,7 +287,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       setVotes((prev) => ({ ...prev, [voterId]: targetId }));
 
       // authoritative -> server
-      wsClient.sendEvent("VOTE_SUBMITTED" as any, { voterId, targetId });
+      wsClient.sendEvent("SUBMIT_VOTE" as any, { voterId, targetId });
     },
     [players],
   );
