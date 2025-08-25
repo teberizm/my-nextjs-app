@@ -1,3 +1,4 @@
+// ws-server.js
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -7,7 +8,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 // In-memory room and player tracking
-// roomId -> { players: Map<playerId, player>, sockets: Set<ws> }
+// roomId -> { players: Map<playerId, player>, sockets: Set<ws>, nightActions: Map<playerId, action>, phase: string }
 const rooms = new Map();
 
 /* -------------------- Helpers -------------------- */
@@ -69,7 +70,12 @@ wss.on('connection', function connection(ws) {
         ws.playerId = player.id;
 
         if (!rooms.has(joinRoomId)) {
-          rooms.set(joinRoomId, { players: new Map(), sockets: new Set() });
+          rooms.set(joinRoomId, {
+            players: new Map(),
+            sockets: new Set(),
+            nightActions: new Map(), // playerId -> action
+            phase: 'LOBBY',
+          });
         }
 
         const room = rooms.get(joinRoomId);
@@ -98,6 +104,7 @@ wss.on('connection', function connection(ws) {
         }
 
         room.players.delete(targetId);
+        if (room.nightActions) room.nightActions.delete(targetId);
         broadcastPlayerList(effectiveRoomId, { removedPlayer: removed });
         break;
       }
@@ -107,6 +114,10 @@ wss.on('connection', function connection(ws) {
         const targetRoomId = ws.roomId || roomId;
         const room = rooms.get(targetRoomId);
         if (!room) return;
+
+        // oyunu başlat: fazı ROLE_REVEAL yap
+        room.phase = 'ROLE_REVEAL';
+        room.nightActions = new Map();
 
         const message = JSON.stringify({ type: 'GAME_STARTED', payload });
         room.sockets.forEach((client) => {
@@ -118,8 +129,8 @@ wss.on('connection', function connection(ws) {
       }
 
       case 'STATE_SNAPSHOT': {
+        // OWNER’ın gönderdiği otoritatif state (roller, faz, süre vs.) → aynen relay
         if (!effectiveRoomId) return;
-        // OWNER’ın gönderdiği otoritatif state (roller, faz, süre vs.)
         broadcastToRoom(effectiveRoomId, {
           type: 'STATE_SNAPSHOT',
           payload,
@@ -129,9 +140,20 @@ wss.on('connection', function connection(ws) {
 
       case 'PHASE_CHANGED': {
         if (!effectiveRoomId) return;
+        const room = rooms.get(effectiveRoomId);
+        if (!room) return;
+
+        const next = payload?.phase || room.phase;
+        room.phase = next;
+
+        // Gece başlarken bir önceki turun aksiyonlarını temizle
+        if (next === 'NIGHT') {
+          room.nightActions = new Map();
+        }
+
         broadcastToRoom(effectiveRoomId, {
           type: 'PHASE_CHANGED',
-          payload,
+          payload: { phase: next },
         });
         break;
       }
@@ -145,6 +167,33 @@ wss.on('connection', function connection(ws) {
         break;
       }
 
+      // === ÖNEMLİ: Oyuncuların gece aksiyonlarını topla ve yayınla ===
+      case 'NIGHT_ACTION_SUBMITTED': {
+        const room = rooms.get(effectiveRoomId);
+        if (!room) return;
+        const action = payload?.action;
+        if (!action) return;
+
+        // timestamp’ı garanti et (number olarak tutalım)
+        const fixed = {
+          ...action,
+          playerId: ws.playerId || playerId || action.playerId,
+          timestamp: Date.now(),
+        };
+
+        if (!room.nightActions) room.nightActions = new Map();
+        room.nightActions.set(fixed.playerId, fixed);
+
+        const actions = Array.from(room.nightActions.values());
+
+        broadcastToRoom(effectiveRoomId, {
+          type: 'NIGHT_ACTION_UPDATED',
+          payload: { actions },
+        });
+        break;
+      }
+
+      // Gerekirse client’tan gelen ham yayınlar (owner dışı) yine relay edilir:
       case 'NIGHT_ACTION_UPDATED': {
         if (!effectiveRoomId) return;
         broadcastToRoom(effectiveRoomId, {
@@ -169,6 +218,9 @@ wss.on('connection', function connection(ws) {
 
       room.players.delete(playerId);
       room.sockets.delete(ws);
+      if (room.nightActions) {
+        room.nightActions.delete(playerId);
+      }
 
       broadcastPlayerList(roomId, { removedPlayer: removed });
 
