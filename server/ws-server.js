@@ -595,7 +595,22 @@ case 'PHASE_CHANGED': {
         if (payload && Array.isArray(payload.players)) {
           room.players = new Map(payload.players.map((p) => [p.id, p]));
         }
-
+        const hasRoles =
+        payload &&
+        Array.isArray(payload.players) &&
+       payload.players.length > 0 &&
+       payload.players.every((p) => typeof p.role === 'string' && p.role.length > 0);
+       if (!hasRoles) {
+       console.warn('[WS] GAME_STARTED reddedildi: payload.players rolsüz.');
+       ws.send(JSON.stringify({
+       type: 'ERROR',
+       payload: { message: 'GAME_STARTED missing roles; owner must start from game controller' }
+        }));
+         break;
+         }
+ // 2b) Rol atanmış listeyi authoritative olarak kaydet
+        room.players = new Map(payload.players.map((p) => [p.id, p]));
+        console.log('[WS] GAME_STARTED kabul edildi. Oyuncu sayısı:', room.players.size);
         // 3) Reset state
         room.state.game = { startedAt: new Date() };
         room.state.currentTurn = 1;
