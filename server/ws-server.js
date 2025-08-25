@@ -648,36 +648,29 @@ wss.on('connection', (ws) => {
         broadcastSnapshot(rid);
         break;
       }
-
+      case 'VOTE_SUBMITTED': // alias - client bazen bu adı gönderiyor
       case 'SUBMIT_VOTE': {
-        const room = rooms.get(rid);
-        if (!room) return;
-        const { voterId, targetId } = payload || {};
-        if (!voterId) return;
+      const room = rooms.get(rid);
+      if (!room) break;
+      const { voterId, targetId } = payload || {};
+      if (!voterId) break;
 
-  // oyu kaydet
-        room.state.votes[voterId] = targetId;
+      room.state.votes[voterId] = targetId;
 
-  // canlılar sayısı
-        const players = Array.from(room.players.values());
-        const aliveIds = new Set(players.filter(p => p.isAlive).map(p => p.id));
+      const players = Array.from(room.players.values());
+      const aliveIds = new Set(players.filter(p => p.isAlive).map(p => p.id));
+      const votedAliveCount = Object.entries(room.state.votes)
+        .filter(([vid]) => aliveIds.has(vid)).length;
 
-  // kaç canlı oy vermiş
-        const votedAliveCount = Object.entries(room.state.votes)
-        .filter(([vid]) => aliveIds.has(vid))
-        .length;
+      broadcast(room, 'VOTES_UPDATED', { votes: room.state.votes });
+      broadcastSnapshot(rid);
 
-  // herkese oy tablosunu yayınla
-        broadcast(room, 'VOTES_UPDATED', { votes: room.state.votes });
-        broadcastSnapshot(rid);
-
-  // herkes oyunu verdiyse beklemeden sonuçlandır
-        if (votedAliveCount >= aliveIds.size && room.state.phase === 'VOTE') {
-        clearTimer(room);
-        processVotes(rid);
-        }
-      break;
+    if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.size) {
+      clearTimer(room);
+      processVotes(rid);
     }
+    break;
+  }
   });
 
   ws.on('close', () => {
