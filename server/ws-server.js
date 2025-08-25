@@ -38,6 +38,9 @@ const toPlain = (obj) =>
 
 function broadcast(room, type, payload = {}) {
   const message = JSON.stringify({ type, payload, serverTime: now() });
+  if (type === 'PHASE_CHANGED' || type === 'STATE_SNAPSHOT') {
+    console.log('[WS→clients]', type, room.state?.phase, 'payload:', payload);
+  }
   room.sockets.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) client.send(message);
   });
@@ -87,6 +90,7 @@ function getWinCondition(players) {
 
 /* -------------- Phase control -------------- */
 function startPhase(roomId, phase, durationSec) {
+  console.log('[WS] startPhase', roomId, phase, 'sec=', durationSec);
   const room = rooms.get(roomId);
   if (!room) return;
 
@@ -564,14 +568,14 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'STATE_SNAPSHOT': {
-  const room = rooms.get(roomId);
+  const room = rooms.get(rid);
   if (!room) return;
   const message = JSON.stringify({ type: 'STATE_SNAPSHOT', payload });
   room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(message));
   break;
 }
 case 'PHASE_CHANGED': {
-  const room = rooms.get(roomId);
+  const room = rooms.get(rid);
   if (!room) return;
   const message = JSON.stringify({ type: 'PHASE_CHANGED', payload });
   room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(message));
