@@ -24,11 +24,10 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   })
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null)
 
-  // UI’nin hangi ekranı göstereceği (LOBBY / oyun fazları)
-  // Oyun fazlarının otoritesi GameController + use-game-state’te (owner tarafında) olacak.
+  // UI fazı (LOBBY / oyun içi fazlar)
   const [gamePhase, setGamePhase] = useState<GamePhase>("LOBBY")
 
-  // Varsayılan ayarlar (owner lobide değiştirebilir)
+  // Varsayılan oyun ayarları
   const [gameSettings, setGameSettings] = useState<GameSettings>({
     traitorCount: 2,
     specialRoleCount: 2,
@@ -71,23 +70,17 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   useEffect(() => {
     if (!currentPlayer) return
 
-    // Tüm oyuncular WS’e bağlanır (çok önemli!)
+    // Odaya bağlan
     wsClient.connect(currentRoom.inviteCode, currentPlayer)
 
-    // Bağlantı log’u (debug)
-    const onConn = (e: any) => {
-      // console.log("WS connected?", e)
-    }
-    wsClient.on("CONNECTION_STATUS", onConn)
-
-    // Sunucudan oyuncu listesi geldiğinde odayı güncelle
+    // Sunucudan oyuncu listesi geldikçe state’i güncelle
     const handlePlayerList = (data: any) => {
       const players = data?.payload?.players || []
       setCurrentRoom((prev) => ({ ...prev, players }))
     }
     wsClient.on("PLAYER_LIST_UPDATED", handlePlayerList)
 
-    // Kick edilirse lobide kal
+    // Kick edilirse lobiye dön
     const handleKicked = (data: any) => {
       if (data?.payload?.playerId === currentPlayer.id) {
         setCurrentPlayer(null)
@@ -96,13 +89,13 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     }
     wsClient.on("PLAYER_KICKED", handleKicked)
 
-    // Oyun başlatıldı → UI GameController’a geçsin
+    // Oyun server’dan başladı -> UI oyun ekranına geçsin
     const onGameStarted = () => {
       setGamePhase("ROLE_REVEAL")
     }
     wsClient.on("GAME_STARTED", onGameStarted)
 
-    // Faz değişimleri (UI eşitleme)
+    // Faz yayınları (ileride ekleyebiliriz)
     const onPhaseChanged = (data: any) => {
       const next = data?.payload?.phase as GamePhase | undefined
       if (next) setGamePhase(next)
@@ -110,7 +103,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     wsClient.on("PHASE_CHANGED", onPhaseChanged)
 
     return () => {
-      wsClient.off("CONNECTION_STATUS", onConn)
       wsClient.off("PLAYER_LIST_UPDATED", handlePlayerList)
       wsClient.off("PLAYER_KICKED", handleKicked)
       wsClient.off("GAME_STARTED", onGameStarted)
@@ -123,12 +115,19 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   // 3) Lobideki buton aksiyonları
   // -----------------------------
   const handleStartGame = () => {
-    // Buton zaten sadece owner’a gösteriliyor.
-    // Burada yalnızca UI’yi oyun ekranına geçiriyoruz.
-    // Asıl rol dağıtımı / broadcast GameController/use-game-state içinde (owner tarafında) yapılır.
-    if (gamePhase === "LOBBY") {
-      setGamePhase("ROLE_REVEAL")
-    }
+    // Buton sadece owner’a gösteriliyor; 4+ kişi şartını RoomLobby zaten kontrol ediyor.
+    if (gamePhase !== "LOBBY") return
+
+    // Herkese “GAME_STARTED” yayınlat (server tüm odaya yayacak).
+    // Not: ŞU AN payload’ı snapshot olarak gönderiyoruz; use-game-state tarafında
+    // owner deterministik rolleri dağıtıp STATE_SNAPSHOT yayınlıyorsa, orayı kullanın.
+    wsClient.sendEvent("GAME_STARTED", {
+      players: currentRoom.players,
+      settings: gameSettings,
+    })
+
+    // kendi UI’ımızı da oyun ekranına alalım
+    setGamePhase("ROLE_REVEAL")
   }
 
   const handleKickPlayer = (playerId: string) => {
@@ -141,7 +140,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   }
 
   const handleGameEnd = () => {
-    // UI’yi lobide göster; oyuncu durumlarını sıfırla (roller temiz vs.)
     setGamePhase("LOBBY")
     setCurrentRoom((prev) => ({
       ...prev,
@@ -179,9 +177,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         />
       ) : (
         <GameController
-          // GameController içinde use-game-state, owner ise rolleri dağıtıp broadcast eder,
-          // diğerleri GAME_STARTED’tan gelen rolleri aynen set eder.
-          initialPlayers={currentRoom.players}
+          initialPlayers={currentRoom.players} // otoritatif liste WS’ten geliyor
           gameSettings={gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
