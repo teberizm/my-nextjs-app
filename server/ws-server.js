@@ -651,31 +651,31 @@ wss.on('connection', (ws) => {
 
       case 'SUBMIT_VOTE': {
   const room = rooms.get(rid);
-  if (!room) return;
-  const { voterId, targetId } = payload || {};
-  if (!voterId) return;
+  if (!room) break;
 
-  // oyu kaydet
+  const { voterId, targetId } = payload || {};
+  if (!voterId) break;
+
+  // Oy kaydet
   room.state.votes[voterId] = targetId;
 
-  // canlılar sayısı
-  const players = Array.from(room.players.values());
-  const aliveIds = new Set(players.filter(p => p.isAlive).map(p => p.id));
+  // Tüm oyunculara güncel tabloyu gönder
+  const votePayload = { votes: room.state.votes };
+  broadcast(room, 'VOTES_UPDATED', votePayload);
+  broadcastSnapshot(rid);
 
-  // kaç canlı oy vermiş
+  // Tüm canlılar oy verdi mi?
+  const players = Array.from(room.players.values());
+  const aliveIds = new Set(players.filter((p) => p.isAlive).map((p) => p.id));
   const votedAliveCount = Object.entries(room.state.votes)
     .filter(([vid]) => aliveIds.has(vid))
     .length;
 
-  // herkese oy tablosunu yayınla
-  broadcast(room, 'VOTES_UPDATED', { votes: room.state.votes });
-  broadcastSnapshot(rid);
-
-  // herkes oyunu verdiyse beklemeden sonuçlandır
-  if (votedAliveCount >= aliveIds.size && room.state.phase === 'VOTE') {
+  if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.size) {
     clearTimer(room);
     processVotes(rid);
   }
+
   break;
 }
 
