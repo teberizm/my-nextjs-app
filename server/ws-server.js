@@ -1,18 +1,21 @@
-// ws-server.js (authoritative server: timers + role assignment + timers + actions)
+// ws-server.js (authoritative server)
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 
+const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
+const WS_PATH = process.env.WS_PATH || '/socket';
+
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server, path: "/socket" });
+const wss = new WebSocket.Server({ server, path: WS_PATH });
 
 /**
  * Room structure:
  * roomId -> {
  *   players: Map<playerId, player>,
  *   sockets: Set<WebSocket>,
- *   settings: { nightDuration, dayDuration, voteDuration, cardDrawCount },
+ *   settings: { nightDuration, dayDuration, voteDuration, cardDrawCount, traitorCount?, specialRoleCount? },
  *   state: {
  *     phase: 'LOBBY' | 'ROLE_REVEAL' | 'NIGHT' | 'NIGHT_RESULTS' | 'DEATH_ANNOUNCEMENT' |
  *            'CARD_DRAWING' | 'DAY_DISCUSSION' | 'VOTE' | 'RESOLVE' | 'END',
@@ -53,12 +56,14 @@ function snapshotRoom(roomId) {
   const state = { ...room.state, players };
   return toPlain(state);
 }
+
 function broadcastSnapshot(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
   const snap = snapshotRoom(roomId);
   broadcast(room, 'STATE_SNAPSHOT', { roomId, state: snap });
 }
+
 function clearTimer(room) {
   if (room.timer) {
     clearTimeout(room.timer);
@@ -93,11 +98,14 @@ function assignRolesServer(players, settings) {
     .map((role, index) => ({ role, index }))
     .filter((r) => convertible.includes(r.role));
   const traitorCount = Math.min(settings?.traitorCount ?? 0, convertibleIdx.length);
-  convertibleIdx.sort(() => Math.random() - 0.5).slice(0, traitorCount).forEach(({ role, index }) => {
-    if (role === 'GUARDIAN') roles[index] = 'EVIL_GUARDIAN';
-    if (role === 'WATCHER') roles[index] = 'EVIL_WATCHER';
-    if (role === 'DETECTIVE') roles[index] = 'EVIL_DETECTIVE';
-  });
+  convertibleIdx
+    .sort(() => Math.random() - 0.5)
+    .slice(0, traitorCount)
+    .forEach(({ role, index }) => {
+      if (role === 'GUARDIAN') roles[index] = 'EVIL_GUARDIAN';
+      if (role === 'WATCHER') roles[index] = 'EVIL_WATCHER';
+      if (role === 'DETECTIVE') roles[index] = 'EVIL_DETECTIVE';
+    });
 
   const shuffledRoles = roles.sort(() => Math.random() - 0.5);
 
@@ -190,7 +198,10 @@ function processNightActions(roomId) {
   guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
       blockedPlayers.add(a.targetId);
-      S.playerNotes[a.targetId] = [...(S.playerNotes[a.targetId] || []), `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`];
+      S.playerNotes[a.targetId] = [
+        ...(S.playerNotes[a.targetId] || []),
+        `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`,
+      ];
     }
   });
 
@@ -223,7 +234,7 @@ function processNightActions(roomId) {
       }
     });
 
-  // 4) Bombs + notes (short)
+  // 4) Bombs + notes
   const bombPlacers = S.nightActions.filter(
     (a) => a.actionType === 'BOMB_PLANT' && !blockedPlayers.has(a.playerId),
   );
@@ -535,12 +546,12 @@ wss.on('connection', (ws) => {
       }
 
       case 'KICK_PLAYER': {
-        if (!rid) return;
+        if (!rid) break;
         const room = rooms.get(rid);
-        if (!room) return;
+        if (!room) break;
 
         const targetId = payload && payload.playerId;
-        if (!targetId) return;
+        if (!targetId) break;
 
         const removed = room.players.get(targetId);
         const targetSocket = Array.from(room.sockets).find((s) => s.playerId === targetId);
@@ -560,14 +571,15 @@ wss.on('connection', (ws) => {
 
       case 'STATE_SNAPSHOT': {
         const room = rooms.get(rid);
-        if (!room) return;
+        if (!room) break;
         const messageToAll = JSON.stringify({ type: 'STATE_SNAPSHOT', payload });
         room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(messageToAll));
         break;
       }
+
       case 'PHASE_CHANGED': {
         const room = rooms.get(rid);
-        if (!room) return;
+        if (!room) break;
         const msg = JSON.stringify({ type: 'PHASE_CHANGED', payload });
         room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(msg));
         break;
@@ -575,7 +587,7 @@ wss.on('connection', (ws) => {
 
       case 'GAME_STARTED': {
         const room = rooms.get(rid);
-        if (!room) return;
+        if (!room) break;
         if (room.state.phase !== 'LOBBY') break;
 
         // 1) settings
@@ -586,7 +598,7 @@ wss.on('connection', (ws) => {
         // 2) players
         let startPlayers = Array.isArray(payload?.players) ? payload.players : Array.from(room.players.values());
 
-        // (kritik) roller yoksa server dağıtsın
+        // server assigns roles if missing
         const hasRoles =
           startPlayers.length > 0 &&
           startPlayers.every((p) => typeof p.role === 'string' && p.role.length > 0);
@@ -611,7 +623,7 @@ wss.on('connection', (ws) => {
         room.state.bombTargets = [];
         room.state.playerNotes = {};
 
-        // 4) faz
+        // 4) phase
         startPhase(rid, 'ROLE_REVEAL', 10);
 
         // 5) inform
@@ -621,7 +633,7 @@ wss.on('connection', (ws) => {
 
       case 'REQUEST_SNAPSHOT': {
         const room = rooms.get(rid);
-        if (!room) return;
+        if (!room) break;
         const snap = snapshotRoom(rid);
         ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: rid, state: snap }, serverTime: now() }));
         break;
@@ -629,9 +641,9 @@ wss.on('connection', (ws) => {
 
       case 'NIGHT_ACTION_SUBMITTED': {
         const room = rooms.get(rid);
-        if (!room) return;
+        if (!room) break;
         const action = payload && payload.action;
-        if (!action) return;
+        if (!action) break;
 
         const fixed = {
           ...action,
@@ -648,30 +660,36 @@ wss.on('connection', (ws) => {
         broadcastSnapshot(rid);
         break;
       }
-      case 'VOTE_SUBMITTED': // alias - client bazen bu adı gönderiyor
+
+      case 'VOTE_SUBMITTED':
       case 'SUBMIT_VOTE': {
-      const room = rooms.get(rid);
-      if (!room) break;
-      const { voterId, targetId } = payload || {};
-      if (!voterId) break;
+        const room = rooms.get(rid);
+        if (!room) break;
+        const { voterId, targetId } = payload || {};
+        if (!voterId) break;
 
-      room.state.votes[voterId] = targetId;
+        room.state.votes[voterId] = targetId;
 
-      const players = Array.from(room.players.values());
-      const aliveIds = new Set(players.filter(p => p.isAlive).map(p => p.id));
-      const votedAliveCount = Object.entries(room.state.votes)
-        .filter(([vid]) => aliveIds.has(vid)).length;
+        const players = Array.from(room.players.values());
+        const aliveIds = new Set(players.filter((p) => p.isAlive).map((p) => p.id));
+        const votedAliveCount = Object.entries(room.state.votes)
+          .filter(([vid]) => aliveIds.has(vid)).length;
 
-      broadcast(room, 'VOTES_UPDATED', { votes: room.state.votes });
-      broadcastSnapshot(rid);
+        broadcast(room, 'VOTES_UPDATED', { votes: room.state.votes });
+        broadcastSnapshot(rid);
 
-    if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.size) {
-      clearTimer(room);
-      processVotes(rid);
-    }
-    break;
-  }
-  });
+        if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.size) {
+          clearTimer(room);
+          processVotes(rid);
+        }
+        break;
+      }
+
+      default:
+        // ignore unknown message types
+        break;
+    } // end switch
+  }); // end ws.on('message')
 
   ws.on('close', () => {
     const { roomId, playerId } = ws;
@@ -711,6 +729,6 @@ wss.on('close', () => clearInterval(interval));
 /* ---------------- HTTP ---------------- */
 app.get('/', (req, res) => res.send('Socket server OK'));
 
-server.listen(3001, '0.0.0.0', () => {
-  console.log('✅ WebSocket sunucu çalışıyor http://0.0.0.0:3001');
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ WebSocket sunucu çalışıyor http://0.0.0.0:${PORT}${WS_PATH}`);
 });
