@@ -17,6 +17,14 @@ interface GameEndProps {
 }
 
 export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLobby }: GameEndProps) {
+  // ---- Güvenli tarih dönüşümü (WS string gelebilir) ----
+  const startedAtDate = game?.startedAt ? new Date(game.startedAt as unknown as string) : null
+  const endedAtDate = game?.endedAt ? new Date(game.endedAt as unknown as string) : null
+  const durationMin =
+    startedAtDate && endedAtDate
+      ? Math.max(0, Math.round((endedAtDate.getTime() - startedAtDate.getTime()) / 60000))
+      : 0
+
   const getWinnerInfo = () => {
     switch (game.winningSide) {
       case "INNOCENTS":
@@ -57,7 +65,6 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
   const winnerInfo = getWinnerInfo()
   const isWinner = () => {
     if (!currentPlayer.role) return false
-
     switch (game.winningSide) {
       case "INNOCENTS":
         return isInnocentRole(currentPlayer.role) || currentPlayer.role === "SURVIVOR"
@@ -70,18 +77,16 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
     }
   }
 
-  const getPlayerInitials = (name: string) => {
-    return name
+  const getPlayerInitials = (name: string) =>
+    name
       .split(" ")
       .map((n) => n[0])
       .join("")
       .toUpperCase()
       .slice(0, 2)
-  }
 
   const winners = players.filter((player) => {
     if (!player.role) return false
-
     switch (game.winningSide) {
       case "INNOCENTS":
         return isInnocentRole(player.role) || player.role === "SURVIVOR"
@@ -211,12 +216,7 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span className="text-muted-foreground">Oyun Süresi:</span>
-                <span className="ml-2 font-semibold">
-                  {game.startedAt && game.endedAt
-                    ? Math.round((game.endedAt.getTime() - game.startedAt.getTime()) / 60000)
-                    : 0}{" "}
-                  dk
-                </span>
+                <span className="ml-2 font-semibold">{durationMin} dk</span>
               </div>
               <div>
                 <span className="text-muted-foreground">Tur Sayısı:</span>
