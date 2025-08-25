@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useMemo } from "react"
 import { useGameState } from "@/hooks/use-game-state"
 import { RoleReveal } from "./role-reveal"
 import { NightActions } from "./night-actions"
@@ -34,7 +34,6 @@ export function GameController({
     timeRemaining,
     currentTurn,
     votes,
-    // startGame,  // <- WS üzerinden başlatıyoruz; lokal çağırmıyoruz
     advancePhase,
     submitNightAction,
     submitVote,
@@ -46,28 +45,31 @@ export function GameController({
     deathLog,
     bombTargets,
     playerNotes,
-    isGameOwner,
   } = useGameState(currentPlayerId)
 
+  // Owner bilgisini initialPlayers'tan (WS snapshot) belirle – oyun başlamadan önce de doğru olur
+  const isOwnerFromInitial = useMemo(() => {
+    return initialPlayers.find((p) => p.id === currentPlayerId)?.isOwner === true
+  }, [initialPlayers, currentPlayerId])
+
   /**
-   * ÖNEMLİ:
-   * - Oyunu burada local olarak başlatmıyoruz.
-   * - Owner, page.tsx’te “Oyunu Başlat” dediğinde WS sunucusuna GAME_STARTED yayınlanıyor.
-   * - useGameState, GAME_STARTED event’i gelince herkes için tek sefer startGame yapıyor.
-   *
-   * Emniyet ağı: Bir sebeple yayın ulaşmadıysa ve owner isek, kısa bir gecikme ile bir defa daha GAME_STARTED yollarız.
+   * Emniyet ağı:
+   * - Oyun başlamadıysa,
+   * - owner bizsek ve odada en az 4 kişi varsa
+   * bir defa GAME_STARTED yayınla.
+   * (useGameState GAME_STARTED'i dinleyip startGame yapar; ikinci kez başlatmaz.)
    */
   useEffect(() => {
-    if (!game && isGameOwner && initialPlayers && initialPlayers.length >= 4) {
+    if (!game && isOwnerFromInitial && initialPlayers.length >= 4) {
       const t = setTimeout(() => {
         wsClient.sendEvent("GAME_STARTED", {
           players: initialPlayers,
           settings: gameSettings,
         })
-      }, 200)
+      }, 150)
       return () => clearTimeout(t)
     }
-  }, [game, isGameOwner, initialPlayers, gameSettings])
+  }, [game, isOwnerFromInitial, initialPlayers, gameSettings])
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
 
