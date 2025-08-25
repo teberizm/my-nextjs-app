@@ -649,38 +649,95 @@ wss.on('connection', (ws) => {
         broadcastSnapshot(rid);
         break;
       }
+      case 'JOIN_ROOM': {
+  const { roomId: joinRoomId, player } = payload || {};
+  if (!joinRoomId || !player || !player.id) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
+    break;
+  }
 
-      case 'SUBMIT_VOTE': {
+  // Bu bağlantının kim olduğunu server tarafında sabitle
+  ws.roomId = joinRoomId;
+  ws.playerId = player.id;
+
+  // Oda yoksa oluştur
+  if (!rooms.has(joinRoomId)) {
+    rooms.set(joinRoomId, {
+      players: new Map(),
+      sockets: new Set(),
+      settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 0 },
+      state: {
+        phase: 'LOBBY',
+        currentTurn: 1,
+        nightActions: [],
+        votes: {},
+        deathsThisTurn: [],
+        deathLog: [],
+        bombTargets: [],
+        playerNotes: {},
+        game: null,
+        phaseEndsAt: 0,
+      },
+      timer: null,
+    });
+  }
+
+  const room = rooms.get(joinRoomId);
+
+  // Oyuncuyu odaya ekle/güncelle
+  const existing = room.players.get(player.id) || {};
+  room.players.set(player.id, { ...existing, ...player, isAlive: existing.isAlive ?? true });
+
+  // Socket set'ine ekle
+  room.sockets.add(ws);
+
+  // Katılan istemciye onay
+  ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
+
+  // Herkese güncel oyuncu listesi
+  broadcast(room, 'PLAYER_LIST_UPDATED', {
+    players: Array.from(room.players.values()),
+    newPlayer: player,
+  });
+
+  // Yeni katılana mevcut state snapshot
+  const snap = snapshotRoom(joinRoomId);
+  ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: joinRoomId, state: snap }, serverTime: now() }));
+  break;
+}
+
+     case 'SUBMIT_VOTE': {
   const room = rooms.get(rid);
   if (!room) break;
 
-  // Oy veren oyuncuyu socket’ten al
+  // Oyu atan kişi — otorite server: ws.playerId
   const voterId = ws.playerId;
-  const targetId = payload?.targetId || null;
-  if (!voterId) break;
+  const targetId = payload?.targetId; // 'SKIP' olabilir veya bir oyuncu id'si
+  if (!voterId || typeof targetId !== 'string') break;
 
-  // Oy kaydet
+  // Sadece canlı oyuncu oy atabilir
+  const voter = room.players.get(voterId);
+  if (!voter || !voter.isAlive) break;
+
+  // Oyu kaydet
   room.state.votes[voterId] = targetId;
+  console.log('[WS] vote:', voterId, '->', targetId);
 
-  // Güncel tabloyu herkese gönder
-  const votePayload = { votes: toPlain(room.state.votes) };
-  broadcast(room, 'VOTES_UPDATED', votePayload);
+  // Tüm oyunculara güncel oy tablosu ve snapshot gönder
+  broadcast(room, 'VOTES_UPDATED', { votes: toPlain(room.state.votes) });
   broadcastSnapshot(rid);
 
-  // Tüm canlı oyuncular oy verdi mi kontrol et
-  const players = Array.from(room.players.values());
-  const aliveIds = new Set(players.filter((p) => p.isAlive).map((p) => p.id));
-  const votedAliveCount = Object.entries(room.state.votes)
-    .filter(([vid]) => aliveIds.has(vid))
-    .length;
+  // Tüm canlılar oy verdi mi?
+  const aliveIds = Array.from(room.players.values()).filter(p => p.isAlive).map(p => p.id);
+  const votedAliveCount = aliveIds.filter(id => Object.prototype.hasOwnProperty.call(room.state.votes, id)).length;
 
-  if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.size) {
+  if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.length) {
     clearTimer(room);
     processVotes(rid);
   }
-
   break;
 }
+
 
 
       default:
