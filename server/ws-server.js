@@ -654,18 +654,20 @@ wss.on('connection', (ws) => {
   const room = rooms.get(rid);
   if (!room) break;
 
-  const { voterId, targetId } = payload || {};
+  // Oy veren oyuncuyu socket’ten al
+  const voterId = ws.playerId;
+  const targetId = payload?.targetId || null;
   if (!voterId) break;
 
   // Oy kaydet
   room.state.votes[voterId] = targetId;
 
-  // Tüm oyunculara güncel tabloyu gönder
-  const votePayload = { votes: room.state.votes };
+  // Güncel tabloyu herkese gönder
+  const votePayload = { votes: toPlain(room.state.votes) };
   broadcast(room, 'VOTES_UPDATED', votePayload);
   broadcastSnapshot(rid);
 
-  // Tüm canlılar oy verdi mi?
+  // Tüm canlı oyuncular oy verdi mi kontrol et
   const players = Array.from(room.players.values());
   const aliveIds = new Set(players.filter((p) => p.isAlive).map((p) => p.id));
   const votedAliveCount = Object.entries(room.state.votes)
