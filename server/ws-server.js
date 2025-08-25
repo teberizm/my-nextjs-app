@@ -108,14 +108,19 @@ wss.on('connection', function connection(ws) {
       }
 
       case 'GAME_STARTED': {
-        if (!effectiveRoomId) return;
-        // Tüm odaya aynen yayınla
-        broadcastToRoom(effectiveRoomId, {
-          type: 'GAME_STARTED',
-          payload, // { players, settings, initiatorId }
-        });
-        break;
-      }
+  // ÖNEMLİ: mesajdaki roomId yerine, soketin zaten bağlı olduğu odayı kullan
+  const targetRoomId = ws.roomId || roomId;
+  const room = rooms.get(targetRoomId);
+  if (!room) return;
+
+  const message = JSON.stringify({ type: 'GAME_STARTED', payload });
+  room.sockets.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+  break;
+}
 
       case 'PHASE_CHANGED': {
         if (!effectiveRoomId) return;
