@@ -4,7 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
-const WS_PATH = process.env.WS_PATH || '/socket';
+const wss = new WebSocket.Server({ server, path: "/socket" });
 
 const app = express();
 const server = http.createServer(app);
