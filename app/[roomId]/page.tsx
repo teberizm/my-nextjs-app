@@ -5,13 +5,13 @@ import { RoomLobby } from "@/components/room/room-lobby"
 import { GameController } from "@/components/game/game-controller"
 import { JoinRoomDialog } from "@/components/room/join-room-dialog"
 import { wsClient } from "@/lib/websocket-client"
-import { useRealtimeGame } from "@/hooks/use-realtime-game"
 import type { Room, Player, GameSettings, GamePhase } from "@/lib/types"
 
 const ROOM_PASSWORD = "1234"
 
 export default function RoomPage({ params }: { params: { roomId: string } }) {
   const { roomId } = params
+
   const [currentRoom, setCurrentRoom] = useState<Room>({
     id: roomId,
     inviteCode: roomId,
@@ -32,6 +32,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     voteDuration: 45,
   })
 
+  // 1) Odaya katılma
   const handleJoin = (name: string, isAdmin: boolean, password?: string): boolean => {
     if (isAdmin && password !== ROOM_PASSWORD) {
       return false
@@ -55,11 +56,66 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     return true
   }
 
-  const handleStartGame = () => {
-    if (gamePhase === "LOBBY") {
-      wsClient.sendEvent("GAME_STARTED", {})
-      setGamePhase("ROLE_REVEAL")
+  // 2) WS’e bağlan / ayrılırken kapat
+  useEffect(() => {
+    if (!currentPlayer) return
+    wsClient.connect(currentRoom.inviteCode, currentPlayer)
+
+    const onConn = (e: any) => console.log("WS connected?", e)
+    wsClient.on("CONNECTION_STATUS", onConn)
+
+    // Oda oyuncu listesi güncellemesi
+    const handlePlayerList = (data: any) => {
+      setCurrentRoom((prev) => ({ ...prev, players: data.payload.players }))
     }
+    wsClient.on("PLAYER_LIST_UPDATED", handlePlayerList)
+
+    // Kick olayı
+    const handleKicked = (data: any) => {
+      if (data.payload.playerId === currentPlayer.id) {
+        setCurrentPlayer(null)
+        setGamePhase("LOBBY")
+      }
+    }
+    wsClient.on("PLAYER_KICKED", handleKicked)
+
+    // Oyun başlangıcı ve faz değişimleri — sayfa tarafında faz geçişini gösterelim
+    const onGameStarted = (data: any) => {
+      setGamePhase("ROLE_REVEAL") // GameController render edilsin
+    }
+    wsClient.on("GAME_STARTED", onGameStarted)
+
+    const onPhaseChanged = (data: any) => {
+      const next = data?.payload?.phase
+      if (next) setGamePhase(next)
+    }
+    wsClient.on("PHASE_CHANGED", onPhaseChanged)
+
+    return () => {
+      wsClient.off("CONNECTION_STATUS", onConn)
+      wsClient.off("PLAYER_LIST_UPDATED", handlePlayerList)
+      wsClient.off("PLAYER_KICKED", handleKicked)
+      wsClient.off("GAME_STARTED", onGameStarted)
+      wsClient.off("PHASE_CHANGED", onPhaseChanged)
+      wsClient.disconnect()
+    }
+  }, [currentPlayer, currentRoom.inviteCode])
+
+  // 3) Oyunu başlat — SADECE owner ve DOĞRU payload ile
+  const handleStartGame = () => {
+    if (!currentPlayer?.isOwner) return
+    if (gamePhase !== "LOBBY") return
+
+    // ÖNEMLİ: use-game-state.ts içindeki GAME_STARTED listener’ı players + settings bekliyor.
+    wsClient.sendEvent("GAME_STARTED", {
+      players: currentRoom.players,
+      settings: gameSettings,
+      initiatorId: currentPlayer.id,
+    })
+
+    // Yerelde fazı hemen ROLE_REVEAL’e çekmemiz, sayfanın GameController’ı göstermesi için faydalı.
+    // (Asıl rol dağıtımı ve gerçek state, GameController/use-game-state’te yapılacak)
+    setGamePhase("ROLE_REVEAL")
   }
 
   const handleKickPlayer = (playerId: string) => {
@@ -86,43 +142,15 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     }))
   }
 
-  const realtime = useRealtimeGame(currentRoom.id, currentPlayer)
-
-  useEffect(() => {
-    setGamePhase(realtime.currentPhase)
-  }, [realtime.currentPhase])
-
-  useEffect(() => {
-    const handleKicked = (data: any) => {
-      if (data.payload.playerId === currentPlayer?.id) {
-        setCurrentPlayer(null)
-      }
-    }
-    wsClient.on("PLAYER_KICKED", handleKicked)
-    const handlePlayerList = (data: any) => {
-      setCurrentRoom((prev) => ({ ...prev, players: data.payload.players }))
-    }
-    wsClient.on("PLAYER_LIST_UPDATED", handlePlayerList)
-    return () => {
-      wsClient.off("PLAYER_KICKED", handleKicked)
-      wsClient.off("PLAYER_LIST_UPDATED", handlePlayerList)
-    }
-  }, [currentPlayer])
-
   if (!currentPlayer) {
     return <JoinRoomDialog onJoin={handleJoin} />
-  }
-
-  const roomWithPlayers = {
-    ...currentRoom,
-    players: realtime.players.length ? realtime.players : currentRoom.players,
   }
 
   return (
     <>
       {gamePhase === "LOBBY" ? (
         <RoomLobby
-          room={roomWithPlayers}
+          room={currentRoom}
           currentPlayer={currentPlayer}
           gameSettings={gameSettings}
           onStartGame={handleStartGame}
@@ -132,7 +160,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         />
       ) : (
         <GameController
-          initialPlayers={roomWithPlayers.players}
+          initialPlayers={currentRoom.players}
           gameSettings={gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
