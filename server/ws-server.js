@@ -1,4 +1,4 @@
-// ws-server.js (authoritative server with phase timers & snapshots)
+// ws-server.js (authoritative server: timers + night actions + votes)
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -14,7 +14,8 @@ const wss = new WebSocket.Server({ server });
  *   sockets: Set<WebSocket>,
  *   settings: { nightDuration, dayDuration, voteDuration, cardDrawCount },
  *   state: {
- *     phase: 'LOBBY' | 'ROLE_REVEAL' | 'NIGHT' | 'NIGHT_RESULTS' | 'DEATH_ANNOUNCEMENT' | 'CARD_DRAWING' | 'DAY_DISCUSSION' | 'VOTE' | 'RESOLVE' | 'END',
+ *     phase: 'LOBBY' | 'ROLE_REVEAL' | 'NIGHT' | 'NIGHT_RESULTS' | 'DEATH_ANNOUNCEMENT' |
+ *            'CARD_DRAWING' | 'DAY_DISCUSSION' | 'VOTE' | 'RESOLVE' | 'END',
  *     currentTurn: number,
  *     nightActions: Array<NightAction>,
  *     votes: Record<string,string>,
@@ -23,7 +24,7 @@ const wss = new WebSocket.Server({ server });
  *     bombTargets: string[],
  *     playerNotes: Record<string, string[]>,
  *     game: { startedAt: Date, endedAt?: Date, winningSide?: string } | null,
- *     phaseEndsAt: number // epoch ms (authoritative per phase)
+ *     phaseEndsAt: number // epoch ms
  *   },
  *   timer: NodeJS.Timeout | null
  * }
@@ -31,20 +32,14 @@ const wss = new WebSocket.Server({ server });
 
 const rooms = new Map();
 
-/* ---------------- Helpers ---------------- */
 const now = () => Date.now();
-
-function toPlain(obj) {
-  // Deep clone + convert Date to ISO for JSON
-  return JSON.parse(JSON.stringify(obj, (k, v) => (v instanceof Date ? v.toISOString() : v)));
-}
+const toPlain = (obj) =>
+  JSON.parse(JSON.stringify(obj, (k, v) => (v instanceof Date ? v.toISOString() : v)));
 
 function broadcast(room, type, payload = {}) {
   const message = JSON.stringify({ type, payload, serverTime: now() });
   room.sockets.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
+    if (client.readyState === WebSocket.OPEN) client.send(message);
   });
 }
 
@@ -52,20 +47,15 @@ function snapshotRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return null;
   const players = Array.from(room.players.values());
-  const state = {
-    ...room.state,
-    players, // include players in snapshot for convenience
-  };
+  const state = { ...room.state, players };
   return toPlain(state);
 }
-
 function broadcastSnapshot(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
-  const safeState = snapshotRoom(roomId);
-  broadcast(room, 'STATE_SNAPSHOT', { roomId, state: safeState });
+  const snap = snapshotRoom(roomId);
+  broadcast(room, 'STATE_SNAPSHOT', { roomId, state: snap });
 }
-
 function clearTimer(room) {
   if (room.timer) {
     clearTimeout(room.timer);
@@ -73,18 +63,39 @@ function clearTimer(room) {
   }
 }
 
+/* ---------------- Game helpers ---------------- */
+const isTraitorRole = (role) =>
+  role === 'EVIL_GUARDIAN' || role === 'EVIL_WATCHER' || role === 'EVIL_DETECTIVE';
+
+function getWinCondition(players) {
+  const alive = players.filter((p) => p.isAlive);
+  const bombers = alive.filter((p) => p.role === 'BOMBER');
+  const traitors = alive.filter((p) => isTraitorRole(p.role));
+  const nonTraitors = alive.filter((p) => !isTraitorRole(p.role) && p.role !== 'BOMBER');
+
+  if (bombers.length > 0 && alive.length - bombers.length <= 1) {
+    return { winner: 'BOMBER', gameEnded: true };
+  }
+  if (bombers.length === 0 && traitors.length >= nonTraitors.length && traitors.length > 0) {
+    return { winner: 'TRAITORS', gameEnded: true };
+  }
+  if (bombers.length === 0 && traitors.length === 0) {
+    return { winner: 'INNOCENTS', gameEnded: true };
+  }
+  return { winner: null, gameEnded: false };
+}
+
+/* -------------- Phase control -------------- */
 function startPhase(roomId, phase, durationSec) {
   const room = rooms.get(roomId);
   if (!room) return;
 
   clearTimer(room);
 
-  // Reset per-phase containers when needed
+  // per-phase resets
   if (phase === 'NIGHT') {
     room.state.nightActions = [];
     room.state.deathsThisTurn = [];
-  } else if (phase === 'NIGHT_RESULTS') {
-    // nothing here
   }
 
   room.state.phase = phase;
@@ -101,17 +112,330 @@ function startPhase(roomId, phase, durationSec) {
       room.timer = null;
       advancePhase(roomId);
     }, durationSec * 1000 + 50);
-  } else {
-    // immediate advance for zero-duration phases is caller's choice
   }
 }
 
-// Minimal, authoritative phase progression
+/* --------- Core resolvers (authoritative) ---------- */
+function processNightActions(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const S = room.state;
+  const players = Array.from(room.players.values());
+
+  // 1) Guardians block (by timestamp)
+  const blockedPlayers = new Set();
+  const guardianActions = S.nightActions
+    .filter((a) => {
+      const actor = players.find((p) => p.id === a.playerId);
+      return (
+        a.actionType === 'PROTECT' &&
+        actor &&
+        (actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') &&
+        a.targetId
+      );
+    })
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+  guardianActions.forEach((a) => {
+    if (!blockedPlayers.has(a.playerId) && a.targetId) {
+      blockedPlayers.add(a.targetId);
+      // note to target
+      S.playerNotes[a.targetId] = [...(S.playerNotes[a.targetId] || []), `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`];
+    }
+  });
+
+  // 2) Resolve kills from unblocked killers
+  const killers = S.nightActions.filter(
+    (a) => a.actionType === 'KILL' && !blockedPlayers.has(a.playerId),
+  );
+  const killTargets = killers.map((k) => k.targetId).filter(Boolean);
+
+  // 3) Doctor revives after kills
+  const revived = new Set();
+  const doctorResults = new Map();
+  S.nightActions
+    .filter((a) => {
+      const actor = players.find((p) => p.id === a.playerId);
+      return a.actionType === 'PROTECT' && actor && actor.role === 'DOCTOR';
+    })
+    .forEach((a) => {
+      const actor = players.find((p) => p.id === a.playerId);
+      const target = players.find((p) => p.id === a.targetId);
+      if (!actor || blockedPlayers.has(actor.id)) {
+        doctorResults.set(a.playerId, { success: false });
+        return;
+      }
+      if (target && (!target.isAlive || killTargets.includes(target.id))) {
+        revived.add(target.id);
+        doctorResults.set(a.playerId, { success: true });
+      } else {
+        doctorResults.set(a.playerId, { success: false });
+      }
+    });
+
+  // 4) Bombs + survivors/protect/watch/detect notes (simplified)
+  const bombPlacers = S.nightActions.filter(
+    (a) => a.actionType === 'BOMB_PLANT' && !blockedPlayers.has(a.playerId),
+  );
+  const detonateAction = S.nightActions.find(
+    (a) => a.actionType === 'BOMB_DETONATE' && !blockedPlayers.has(a.playerId),
+  );
+
+  let newBombTargets = [...S.bombTargets];
+  bombPlacers.forEach((a) => {
+    if (a.targetId && !newBombTargets.includes(a.targetId)) newBombTargets.push(a.targetId);
+  });
+
+  const protectedPlayers = new Set();
+  const survivorActors = new Set();
+  let detonateIndex = -1;
+
+  const updatedActions = S.nightActions.map((action, idx) => {
+    const actor = players.find((p) => p.id === action.playerId);
+    const target = players.find((p) => p.id === action.targetId);
+    let result = null;
+
+    if (!actor) return { ...action };
+
+    if (blockedPlayers.has(actor.id)) {
+      return { ...action, result: { type: 'BLOCKED' } };
+    }
+
+    if (action.actionType === 'PROTECT' && actor.role !== 'DELI') {
+      if ((actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') && action.targetId) {
+        result = { type: 'BLOCK' };
+      } else if (actor.role === 'SURVIVOR') {
+        if (actor.survivorShields && actor.survivorShields > 0 && action.targetId === actor.id) {
+          protectedPlayers.add(actor.id);
+          survivorActors.add(actor.id);
+          const remaining = Math.max((actor.survivorShields || 0) - 1, 0);
+          result = { type: 'PROTECT', remaining };
+        }
+      } else if (actor.role === 'DOCTOR') {
+        const doc = doctorResults.get(actor.id);
+        if (doc) result = { type: 'REVIVE', success: doc.success };
+      } else if (action.targetId) {
+        protectedPlayers.add(action.targetId);
+        result = { type: 'PROTECT' };
+      }
+    }
+
+    if (action.actionType === 'INVESTIGATE' && target) {
+      if (actor.role === 'DELI') {
+        // Deli: yanlış bilgi üretir
+        // basit fake: iki rastgele rol
+        const pool = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
+        const r1 = pool[Math.floor(Math.random()*pool.length)];
+        let r2 = pool[Math.floor(Math.random()*pool.length)];
+        if (r2 === r1) r2 = pool[(pool.indexOf(r1)+1)%pool.length];
+        result = { type: 'DETECT', roles: [r1, r2] };
+      } else if (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') {
+        const visitors = S.nightActions
+          .filter((a) => a.targetId === target.id && a.playerId !== actor.id && a.playerId !== target.id && !blockedPlayers.has(a.playerId))
+          .map((a) => players.find((p) => p.id === a.playerId)?.name || '')
+          .filter(Boolean);
+        result = { type: 'WATCH', visitors };
+      } else if (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') {
+        const roles = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
+        const actual = target.role;
+        let fake = roles[Math.floor(Math.random()*roles.length)];
+        if (fake === actual) fake = roles[(roles.indexOf(fake)+1)%roles.length];
+        const shown = [actual, fake].sort(() => Math.random()-0.5);
+        result = { type: 'DETECT', roles: [shown[0], shown[1]] };
+      }
+    }
+
+    if (action.actionType === 'BOMB_PLANT') {
+      result = { type: 'BOMB_PLANT' };
+    } else if (action.actionType === 'BOMB_DETONATE') {
+      detonateIndex = idx;
+    }
+
+    // Notes
+    if (result) {
+      const prefix = `${S.currentTurn}. Gece:`;
+      let note = '';
+      if (result.type === 'PROTECT') {
+        if (actor.role === 'SURVIVOR' && action.targetId === actor.id) {
+          note = `${prefix} Kendini korudun (${result.remaining} hak kaldı)`;
+        } else if (target) {
+          note = `${prefix} ${target.name} oyuncusunu korudun`;
+        }
+      } else if (result.type === 'BLOCK' && target) {
+        note = `${prefix} ${target.name} oyuncusunu tuttun`;
+      } else if (result.type === 'REVIVE' && target) {
+        note = result.success
+          ? `${prefix} ${target.name} oyuncusunu dirilttin`
+          : `${prefix} ${target.name} oyuncusunu diriltmeyi denedin`;
+      } else if (result.type === 'WATCH' && target) {
+        const vt = (result.visitors && result.visitors.length > 0) ? result.visitors.join(', ') : 'kimse gelmedi';
+        note = `${prefix} ${target.name} oyuncusunu izledin: ${vt}`;
+      } else if (result.type === 'DETECT' && target) {
+        const [r1, r2] = result.roles || [];
+        note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${r1}, ${r2}`;
+      } else if (result.type === 'BOMB_PLANT' && target) {
+        note = `${prefix} ${target.name} oyuncusuna bomba yerleştirdin`;
+      }
+      if (note) {
+        S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
+      }
+    }
+
+    return { ...action, result };
+  });
+
+  // 5) Bomb detonate victims
+  let bombVictims = [];
+  if (detonateIndex !== -1) {
+    bombVictims = players.filter((p) => newBombTargets.includes(p.id) && p.isAlive);
+    const victimNames = bombVictims.map((p) => p.name);
+    updatedActions[detonateIndex] = {
+      ...updatedActions[detonateIndex],
+      result: { type: 'BOMB_DETONATE', victims: victimNames },
+    };
+    const actorId = updatedActions[detonateIndex].playerId;
+    const text = victimNames.length > 0 ? victimNames.join(', ') : 'kimse ölmedi';
+    S.playerNotes[actorId] = [...(S.playerNotes[actorId] || []), `${S.currentTurn}. Gece: bombaları patlattın: ${text}`];
+    newBombTargets = [];
+  }
+
+  const targetedIds = killTargets.filter(Boolean);
+  const bombVictimIds = bombVictims.map((p) => p.id);
+  const newDeaths = [];
+
+  // 6) Apply effects to players map (authoritative)
+  const newPlayersMap = new Map(room.players);
+  Array.from(newPlayersMap.values()).forEach((pl) => {
+    pl.hasShield = false;
+  });
+
+  // protect flags
+  protectedPlayers.forEach((pid) => {
+    const p = newPlayersMap.get(pid);
+    if (p) p.hasShield = true;
+  });
+
+  // survivor shield decrement
+  survivorActors.forEach((pid) => {
+    const p = newPlayersMap.get(pid);
+    if (p) p.survivorShields = Math.max((p.survivorShields || 0) - 1, 0);
+  });
+
+  // revives
+  revived.forEach((pid) => {
+    const p = newPlayersMap.get(pid);
+    if (p) p.isAlive = true;
+  });
+
+  // deaths by bombs/kills
+  Array.from(newPlayersMap.values()).forEach((p) => {
+    if (bombVictimIds.includes(p.id) && !revived.has(p.id)) {
+      if (p.isAlive) {
+        p.isAlive = false;
+        newDeaths.push({ ...p });
+      }
+    } else if (targetedIds.includes(p.id) && !protectedPlayers.has(p.id) && !revived.has(p.id)) {
+      if (p.isAlive) {
+        p.isAlive = false;
+        newDeaths.push({ ...p });
+      }
+    }
+  });
+
+  // write back players
+  room.players = newPlayersMap;
+
+  // attackers notes
+  S.nightActions
+    .filter((a) => a.actionType === 'KILL')
+    .forEach((a) => {
+      const actor = room.players.get(a.playerId);
+      const target = a.targetId ? room.players.get(a.targetId) : null;
+      if (actor && target) {
+        const killed = newDeaths.some((d) => d.id === target.id);
+        const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? ' ve öldürdün' : ''}`;
+        S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
+      }
+    });
+
+  // no-action notes
+  const actedIds = new Set(S.nightActions.map((a) => a.playerId));
+  Array.from(room.players.values()).forEach((p) => {
+    if (p.isAlive && !actedIds.has(p.id)) {
+      S.playerNotes[p.id] = [...(S.playerNotes[p.id] || []), `${S.currentTurn}. Gece: hiçbir şey yapmadın`];
+    }
+  });
+
+  // update state buckets
+  S.nightActions = updatedActions;
+  S.deathsThisTurn = newDeaths;
+  if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
+  S.bombTargets = newBombTargets;
+
+  broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
+  broadcastSnapshot(roomId);
+
+  // next phase
+  startPhase(roomId, 'NIGHT_RESULTS', 5);
+}
+
+function processVotes(roomId) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const S = room.state;
+  const players = Array.from(room.players.values());
+  const alive = players.filter((p) => p.isAlive);
+
+  const voteCount = {};
+  Object.entries(S.votes).forEach(([voterId, targetId]) => {
+    const voter = players.find((p) => p.id === voterId);
+    if (voter?.isAlive && targetId !== 'SKIP') {
+      voteCount[targetId] = (voteCount[targetId] || 0) + 1;
+    }
+  });
+
+  let maxVotes = 0;
+  let eliminatedId = null;
+  Object.entries(voteCount).forEach(([pid, count]) => {
+    if (count > maxVotes) {
+      maxVotes = count;
+      eliminatedId = pid;
+    }
+  });
+
+  const top = Object.entries(voteCount).filter(([, c]) => c === maxVotes);
+  if (top.length > 1) eliminatedId = null;
+
+  const newPlayersMap = new Map(room.players);
+  const newDeaths = [];
+  if (eliminatedId && maxVotes > 0) {
+    const target = newPlayersMap.get(eliminatedId);
+    if (target && target.isAlive) {
+      target.isAlive = false;
+      newDeaths.push({ ...target });
+    }
+  }
+  room.players = newPlayersMap;
+  S.deathsThisTurn = newDeaths;
+  if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
+
+  broadcastSnapshot(roomId);
+  startPhase(roomId, 'RESOLVE', 3);
+}
+
 function advancePhase(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
   const S = room.state;
   const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 0 };
+
+  // win check (before going further)
+  const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()));
+  if (gameEnded && S.phase !== 'END') {
+    S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner };
+    startPhase(roomId, 'END', 0);
+    return;
+  }
 
   switch (S.phase) {
     case 'ROLE_REVEAL':
@@ -119,8 +443,7 @@ function advancePhase(roomId) {
       break;
 
     case 'NIGHT':
-      // TODO: Process night actions here (block/kill/revive/bombs/notes)
-      startPhase(roomId, 'NIGHT_RESULTS', 5);
+      processNightActions(roomId);
       break;
 
     case 'NIGHT_RESULTS':
@@ -144,12 +467,10 @@ function advancePhase(roomId) {
       break;
 
     case 'VOTE':
-      // TODO: tally votes into deathsThisTurn/deathLog if needed
-      startPhase(roomId, 'RESOLVE', 3);
+      processVotes(roomId);
       break;
 
     case 'RESOLVE':
-      // TODO: win condition check → END or next night
       S.currentTurn = (S.currentTurn || 1) + 1;
       startPhase(roomId, 'NIGHT', settings.nightDuration);
       break;
@@ -161,18 +482,12 @@ function advancePhase(roomId) {
 
 /* -------------- WebSocket events ------------ */
 wss.on('connection', (ws) => {
-  // Heartbeat
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
   ws.on('message', (message) => {
     let data;
-    try {
-      data = JSON.parse(message);
-    } catch (e) {
-      console.error('Invalid WS message (not JSON):', e);
-      return;
-    }
+    try { data = JSON.parse(message); } catch (e) { console.error('Invalid WS message', e); return; }
 
     const { type, payload, roomId, playerId } = data || {};
     const rid = roomId || ws.roomId;
@@ -214,10 +529,12 @@ wss.on('connection', (ws) => {
 
         ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
 
-        // broadcast player list
-        const players = Array.from(room.players.values());
-        broadcast(room, 'PLAYER_LIST_UPDATED', { players, newPlayer: player });
-        // send snapshot to the new joiner
+        broadcast(room, 'PLAYER_LIST_UPDATED', {
+          players: Array.from(room.players.values()),
+          newPlayer: player,
+        });
+
+        // snapshot to the new joiner
         const snap = snapshotRoom(joinRoomId);
         ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: joinRoomId, state: snap }, serverTime: now() }));
         break;
@@ -240,26 +557,29 @@ wss.on('connection', (ws) => {
         }
 
         room.players.delete(targetId);
-        broadcast(room, 'PLAYER_LIST_UPDATED', { players: Array.from(room.players.values()), removedPlayer: removed });
+        broadcast(room, 'PLAYER_LIST_UPDATED', {
+          players: Array.from(room.players.values()),
+          removedPlayer: removed,
+        });
         break;
       }
 
       case 'GAME_STARTED': {
         const room = rooms.get(rid);
         if (!room) return;
-        if (room.state.phase !== 'LOBBY') {
-          // already started; ignore duplicate
-          break;
-        }
-        // store settings from owner
+        if (room.state.phase !== 'LOBBY') break;
+
+        // 1) Settings
         if (payload && payload.settings) {
-          room.settings = {
-            ...room.settings,
-            ...payload.settings,
-          };
+          room.settings = { ...room.settings, ...payload.settings };
         }
 
-        // reset state
+        // 2) Owner gönderdiği rolleri authoritative olarak kaydet (çok kritik!)
+        if (payload && Array.isArray(payload.players)) {
+          room.players = new Map(payload.players.map((p) => [p.id, p]));
+        }
+
+        // 3) Reset state
         room.state.game = { startedAt: new Date() };
         room.state.currentTurn = 1;
         room.state.nightActions = [];
@@ -269,10 +589,10 @@ wss.on('connection', (ws) => {
         room.state.bombTargets = [];
         room.state.playerNotes = {};
 
-        // move to ROLE_REVEAL with 10s
+        // 4) Faz
         startPhase(rid, 'ROLE_REVEAL', 10);
 
-        // Also broadcast GAME_STARTED for clients that listen for it
+        // 5) Bilgilendirme
         broadcast(room, 'GAME_STARTED', payload || {});
         break;
       }
@@ -285,11 +605,6 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      // Client-driven phase changes are ignored (server is authoritative).
-      case 'PHASE_CHANGED':
-        // ignore
-        break;
-
       case 'NIGHT_ACTION_SUBMITTED': {
         const room = rooms.get(rid);
         if (!room) return;
@@ -298,19 +613,17 @@ wss.on('connection', (ws) => {
 
         const fixed = {
           ...action,
-          playerId: (ws.playerId || playerId || action.playerId),
+          playerId: ws.playerId || playerId || action.playerId,
           timestamp: new Date(),
         };
 
-        // Replace or add action per-player
+        // replace previous action by same player
         room.state.nightActions = [
-          ...room.state.nightActions.filter(a => a.playerId !== fixed.playerId),
+          ...room.state.nightActions.filter((a) => a.playerId !== fixed.playerId),
           fixed,
         ];
 
-        broadcast(room, 'NIGHT_ACTIONS_UPDATED', {
-          actions: toPlain(room.state.nightActions),
-        });
+        broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(room.state.nightActions) });
         broadcastSnapshot(rid);
         break;
       }
@@ -320,16 +633,14 @@ wss.on('connection', (ws) => {
         if (!room) return;
         const { voterId, targetId } = payload || {};
         if (!voterId) return;
-        room.state.votes[voterId] = targetId;
 
-        // Optionally: if all alive voted, you can fast-forward by clearing timer and calling advancePhase
+        room.state.votes[voterId] = targetId;
         broadcast(room, 'VOTES_UPDATED', { votes: room.state.votes });
         broadcastSnapshot(rid);
         break;
       }
 
       default:
-        // Unknown events ignored
         break;
     }
   });
@@ -339,12 +650,12 @@ wss.on('connection', (ws) => {
     if (roomId && rooms.has(roomId)) {
       const room = rooms.get(roomId);
       const removed = room.players.get(playerId);
-
       room.players.delete(playerId);
       room.sockets.delete(ws);
-
-      broadcast(room, 'PLAYER_LIST_UPDATED', { players: Array.from(room.players.values()), removedPlayer: removed });
-
+      broadcast(room, 'PLAYER_LIST_UPDATED', {
+        players: Array.from(room.players.values()),
+        removedPlayer: removed,
+      });
       if (room.players.size === 0) {
         clearTimer(room);
         rooms.delete(roomId);
@@ -352,9 +663,7 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('error', (err) => {
-    console.error('WS error:', err && err.message ? err.message : err);
-  });
+  ws.on('error', (err) => console.error('WS error:', err?.message || err));
 });
 
 /* ---------------- Heartbeat ---------------- */
