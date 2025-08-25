@@ -12,7 +12,6 @@ const ROOM_PASSWORD = "1234";
 export default function RoomPage({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
 
-  // ---- Oda & Oyuncu durumu ----
   const [currentRoom, setCurrentRoom] = useState<Room>({
     id: roomId,
     inviteCode: roomId,
@@ -23,11 +22,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     createdAt: new Date(),
   });
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
-
-  // UI fazı (LOBBY / oyun içi fazlar)
   const [gamePhase, setGamePhase] = useState<GamePhase>("LOBBY");
 
-  // Varsayılan oyun ayarları
   const [gameSettings, setGameSettings] = useState<GameSettings>({
     traitorCount: 2,
     specialRoleCount: 2,
@@ -37,9 +33,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     voteDuration: 45,
   });
 
-  // -----------------------------
-  // 1) Odaya katıl
-  // -----------------------------
   const handleJoin = (name: string, isAdmin: boolean, password?: string): boolean => {
     if (isAdmin && password !== ROOM_PASSWORD) {
       return false;
@@ -64,26 +57,20 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     return true;
   };
 
-  // -----------------------------
-  // 2) WS’e bağlan / dinle
-  // -----------------------------
   useEffect(() => {
     if (!currentPlayer) return;
 
-    // Odaya bağlan
     wsClient.connect(currentRoom.inviteCode, currentPlayer);
 
-    // Bağlanır bağlanmaz snapshot iste
+    // bağlanır bağlanmaz oda snapshot'ı iste
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
 
-    // Oyuncu listesi yayını
     const handlePlayerList = (data: any) => {
       const players = data?.payload?.players || [];
       setCurrentRoom((prev) => ({ ...prev, players }));
     };
     wsClient.on("PLAYER_LIST_UPDATED", handlePlayerList);
 
-    // Kick edilirse lobiye dön
     const handleKicked = (data: any) => {
       if (data?.payload?.playerId === currentPlayer.id) {
         setCurrentPlayer(null);
@@ -92,23 +79,25 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     };
     wsClient.on("PLAYER_KICKED", handleKicked);
 
-    // Oyun server’dan başlatıldı -> hemen ROLE_REVEAL’e al (takılmayı önler)
     const onGameStarted = () => {
-      setGamePhase("ROLE_REVEAL");
+      // server faz yayınlayacağı için sadece log
+      console.log("[client] GAME_STARTED received");
     };
     wsClient.on("GAME_STARTED", onGameStarted);
 
-    // Sunucu faz yayınları
     const onPhaseChanged = (data: any) => {
       const next = data?.payload?.phase as GamePhase | undefined;
-      if (next) setGamePhase(next);
+      if (next) {
+        console.log("[client] PHASE_CHANGED", data.payload);
+        setGamePhase(next);
+      }
     };
     wsClient.on("PHASE_CHANGED", onPhaseChanged);
 
-    // Sunucudan tam snapshot gelirse oyuncu listesi ve gerekirse fazı güncelle
     const onSnapshot = (data: any) => {
       const s = data?.payload?.state;
       if (!s) return;
+      console.log("[client] STATE_SNAPSHOT received", s);
       if (Array.isArray(s.players)) {
         setCurrentRoom((prev) => ({ ...prev, players: s.players }));
       }
@@ -128,14 +117,16 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     };
   }, [currentPlayer, currentRoom.inviteCode]);
 
-  // -----------------------------
-  // 3) Lobideki buton aksiyonları
-  // -----------------------------
+  // Owner "Başlat" → server-authoritative GAME_STARTED
   const handleStartGame = () => {
-    console.log('[ui] handleStartGame click by owner');
-  if (gamePhase !== "LOBBY") return;
-  setGamePhase("ROLE_REVEAL");
-};
+    if (gamePhase !== "LOBBY") return;
+    console.log("[ui] handleStartGame click by owner");
+    wsClient.sendEvent("GAME_STARTED" as any, {
+      players: currentRoom.players,      // roller yoksa server dağıtacak
+      settings: gameSettings,
+    });
+    // Fazı local değiştirmiyoruz; server PHASE_CHANGED yayınlar.
+  };
 
   const handleKickPlayer = (playerId: string) => {
     wsClient.sendEvent("KICK_PLAYER", { playerId });
@@ -161,9 +152,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     }));
   };
 
-  // -----------------------------
-  // 4) Render
-  // -----------------------------
   if (!currentPlayer) {
     return <JoinRoomDialog onJoin={handleJoin} />;
   }
@@ -184,7 +172,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         />
       ) : (
         <GameController
-          initialPlayers={currentRoom.players} // otoritatif liste WS’ten güncellenir
+          initialPlayers={currentRoom.players}
           gameSettings={gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
