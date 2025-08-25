@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useGameState } from "@/hooks/use-game-state"
 import { RoleReveal } from "./role-reveal"
 import { NightActions } from "./night-actions"
@@ -12,6 +12,7 @@ import { DeathAnnouncement } from "./death-announcement"
 import { VoteResults } from "./vote-results"
 import { CardDrawingPhase } from "./card-drawing-phase"
 import type { Player, GameSettings } from "@/lib/types"
+import { wsClient } from "@/lib/websocket-client"
 
 interface GameControllerProps {
   initialPlayers: Player[]
@@ -20,7 +21,12 @@ interface GameControllerProps {
   onGameEnd: () => void
 }
 
-export function GameController({ initialPlayers, gameSettings, currentPlayerId, onGameEnd }: GameControllerProps) {
+export function GameController({
+  initialPlayers,
+  gameSettings,
+  currentPlayerId,
+  onGameEnd,
+}: GameControllerProps) {
   const {
     game,
     players,
@@ -28,7 +34,7 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     timeRemaining,
     currentTurn,
     votes,
-    startGame,
+    // startGame,  // <- WS üzerinden başlatıyoruz; lokal çağırmıyoruz
     advancePhase,
     submitNightAction,
     submitVote,
@@ -40,13 +46,28 @@ export function GameController({ initialPlayers, gameSettings, currentPlayerId, 
     deathLog,
     bombTargets,
     playerNotes,
+    isGameOwner,
   } = useGameState(currentPlayerId)
 
+  /**
+   * ÖNEMLİ:
+   * - Oyunu burada local olarak başlatmıyoruz.
+   * - Owner, page.tsx’te “Oyunu Başlat” dediğinde WS sunucusuna GAME_STARTED yayınlanıyor.
+   * - useGameState, GAME_STARTED event’i gelince herkes için tek sefer startGame yapıyor.
+   *
+   * Emniyet ağı: Bir sebeple yayın ulaşmadıysa ve owner isek, kısa bir gecikme ile bir defa daha GAME_STARTED yollarız.
+   */
   useEffect(() => {
-    if (!game) {
-      startGame(initialPlayers, gameSettings)
+    if (!game && isGameOwner && initialPlayers && initialPlayers.length >= 4) {
+      const t = setTimeout(() => {
+        wsClient.sendEvent("GAME_STARTED", {
+          players: initialPlayers,
+          settings: gameSettings,
+        })
+      }, 200)
+      return () => clearTimeout(t)
     }
-  }, [game, initialPlayers, gameSettings, startGame])
+  }, [game, isGameOwner, initialPlayers, gameSettings])
 
   const currentPlayer = players.find((p) => p.id === currentPlayerId)
 
