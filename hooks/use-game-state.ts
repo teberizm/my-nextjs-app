@@ -1,3 +1,4 @@
+// use-game-state.ts
 "use client"
 
 import { useState, useEffect, useCallback, useRef } from "react"
@@ -31,8 +32,16 @@ interface GameStateHook {
   resetGame: () => void
 }
 
-/* ------------ Win condition helper (aynı) ------------ */
-function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
+/* ---------------- Helpers ---------------- */
+const reviveDate = (v: any) => {
+  if (typeof v === "string" || typeof v === "number") {
+    const d = new Date(v)
+    if (!isNaN(d.getTime())) return d
+  }
+  return v
+}
+
+function localWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
   const alivePlayers = players.filter((p) => p.isAlive)
   const aliveTraitors = alivePlayers.filter((p) =>
     ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role!),
@@ -54,6 +63,7 @@ function getWinCondition(players: Player[]): { winner: string | null; gameEnded:
   return { winner: null, gameEnded: false }
 }
 
+/* ---------------- Hook ---------------- */
 export function useGameState(currentPlayerId: string): GameStateHook {
   const [game, setGame] = useState<Game | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
@@ -69,10 +79,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [bombTargets, setBombTargets] = useState<string[]>([])
   const [playerNotes, setPlayerNotes] = useState<Record<string, string[]>>({})
 
-  const currentPlayer = players.find((p) => p.id === currentPlayerId)
-  const isGameOwner = currentPlayer?.isOwner || false
+  const me = players.find((p) => p.id === currentPlayerId)
+  const isGameOwner = !!me?.isOwner
 
-  /* ---------------- Notes helper ---------------- */
   const addPlayerNote = useCallback((playerId: string, note: string) => {
     setPlayerNotes((prev) => ({
       ...prev,
@@ -80,27 +89,59 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }))
   }, [])
 
-  /* --------------- SNAPSHOT uygula --------------- */
-  const applySnapshot = useCallback((snap: {
-    game: Game,
-    players: Player[],
-    phase: GamePhase,
-    timeRemaining: number,
-    currentTurn: number,
-    nightActions?: NightAction[],
-    votes?: Record<string, string>,
-    selectedCardDrawers?: string[],
-    currentCardDrawer?: string | null,
-    deathLog?: Player[],
-    bombTargets?: string[],
-    playerNotes?: Record<string, string[]>,
-  }) => {
-    setGame(snap.game)
-    setPlayers(snap.players)
-    setCurrentPhase(snap.phase)
-    setTimeRemaining(snap.timeRemaining)
-    setCurrentTurn(snap.currentTurn)
-    setNightActions(snap.nightActions || [])
+  /* --------- SNAPSHOT (owner yayınlar, herkes uygular) --------- */
+  const broadcastSnapshot = useCallback(() => {
+    if (!isGameOwner || !game) return
+    const payload = {
+      game,
+      players,
+      phase: currentPhase,
+      timeRemaining,
+      currentTurn,
+      nightActions,
+      votes,
+      selectedCardDrawers,
+      currentCardDrawer,
+      deathLog,
+      bombTargets,
+      playerNotes,
+    }
+    wsClient.sendEvent("STATE_SNAPSHOT" as any, payload)
+  }, [
+    isGameOwner,
+    game,
+    players,
+    currentPhase,
+    timeRemaining,
+    currentTurn,
+    nightActions,
+    votes,
+    selectedCardDrawers,
+    currentCardDrawer,
+    deathLog,
+    bombTargets,
+    playerNotes,
+  ])
+
+  const applySnapshot = useCallback((snap: any) => {
+    if (!snap) return
+    const fixedGame: Game = {
+      ...snap.game,
+      startedAt: reviveDate(snap.game?.startedAt) as Date,
+      endedAt: snap.game?.endedAt ? (reviveDate(snap.game.endedAt) as Date) : undefined,
+    }
+
+    const fixedActions: NightAction[] = (snap.nightActions || []).map((a: NightAction) => ({
+      ...a,
+      timestamp: reviveDate(a.timestamp) as Date,
+    }))
+
+    setGame(fixedGame || null)
+    setPlayers(snap.players || [])
+    setCurrentPhase(snap.phase || "LOBBY")
+    setTimeRemaining(typeof snap.timeRemaining === "number" ? snap.timeRemaining : 0)
+    setCurrentTurn(snap.currentTurn || 1)
+    setNightActions(fixedActions)
     setVotes(snap.votes || {})
     setSelectedCardDrawers(snap.selectedCardDrawers || [])
     setCurrentCardDrawer(snap.currentCardDrawer || null)
@@ -109,10 +150,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setPlayerNotes(snap.playerNotes || {})
   }, [])
 
-  /* --------------- Game start (OWNER) --------------- */
+  /* ------------------- Oyunu başlat (owner) ------------------- */
   const startGame = useCallback((gamePlayers: Player[], settings: GameSettings) => {
-    // OWNER HARİCİ kimse burada assignRoles çağırmamalı
-    // OWNER burada rolleri dağıtır ve STATE_SNAPSHOT yayınlar
+    // Roller yalnızca owner tarafından atanır, snapshot yayınlanır
     const playersWithRoles = assignRoles(gamePlayers, settings)
 
     const newGame: Game = {
@@ -125,29 +165,30 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       startedAt: new Date(),
     }
 
-    const snapshot = {
-      game: newGame,
-      players: playersWithRoles,
-      phase: "ROLE_REVEAL" as GamePhase,
-      timeRemaining: 15,
-      currentTurn: 1,
-      nightActions: [],
-      votes: {},
-      selectedCardDrawers: [],
-      currentCardDrawer: null,
-      deathLog: [],
-      bombTargets: [],
-      playerNotes: {},
-    }
+    setGame(newGame)
+    setPlayers(playersWithRoles)
+    setCurrentPhase("ROLE_REVEAL")
+    setTimeRemaining(15)
+    setCurrentTurn(1)
+    setNightActions([])
+    setVotes({})
+    setSelectedCardDrawers([])
+    setCurrentCardDrawer(null)
+    setDeathsThisTurn([])
+    setDeathLog([])
+    setBombTargets([])
+    setPlayerNotes({})
 
-    // Lokal uygula
-    applySnapshot(snapshot)
-    // Odaya yayınla
-    wsClient.sendEvent("STATE_SNAPSHOT" as any, snapshot)
-  }, [applySnapshot])
+    // Snapshot + faz bildir
+    setTimeout(() => {
+      broadcastSnapshot()
+      wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "ROLE_REVEAL" })
+    }, 0)
+  }, [broadcastSnapshot])
 
-  /* --------------- Gece aksiyon çözümü --------------- */
+  /* -------------------- Gece aksiyonlarını işle (owner) -------------------- */
   const processNightActions = useCallback(() => {
+    // Step 1: Guardians block their targets in timestamp order
     const blockedPlayers = new Set<string>()
     const guardianActions = nightActions
       .filter((action) => {
@@ -168,11 +209,13 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       }
     })
 
+    // Step 2: Resolve kills from unblocked killers
     const killers = nightActions.filter(
       (action) => action.actionType === "KILL" && !blockedPlayers.has(action.playerId),
     )
     const killTargets = killers.map((k) => k.targetId).filter(Boolean) as string[]
 
+    // Step 3: Resolve doctor revives after kills
     const revivedPlayers = new Set<string>()
     const doctorResults = new Map<string, { success: boolean }>()
     nightActions
@@ -195,12 +238,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         }
       })
 
+    // Step 4: process remaining actions (watchers, survivors, bombs, etc.)
     const bombPlacers = nightActions.filter(
       (a) => a.actionType === "BOMB_PLANT" && !blockedPlayers.has(a.playerId),
     )
-    const detonateAction = nightActions.find(
-      (a) => a.actionType === "BOMB_DETONATE" && !blockedPlayers.has(a.playerId),
-    )
+    nightActions.find((a) => a.actionType === "BOMB_DETONATE" && !blockedPlayers.has(a.playerId))
 
     let newBombTargets = [...bombTargets]
     bombPlacers.forEach((a) => {
@@ -223,7 +265,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         return { ...action, result: { type: "BLOCKED" } }
       }
 
-      if (action.actionType === "PROTECT") {
+      if (action.actionType === "PROTECT" && actor.role !== "DELI") {
         if (["GUARDIAN", "EVIL_GUARDIAN"].includes(actor.role!) && action.targetId) {
           result = { type: "BLOCK" }
         } else if (actor.role === "SURVIVOR") {
@@ -345,7 +387,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       newBombTargets = []
     }
 
-    const targetedPlayers = killTargets
+    const targetedPlayers = killers.map((k) => k.targetId).filter(Boolean) as string[]
     const bombVictimIds = bombVictims.map((p) => p.id)
 
     const newDeaths: Player[] = []
@@ -354,9 +396,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       prevPlayers.map((player) => {
         const updatedPlayer: Player = { ...player, hasShield: false }
 
-        if (protectedPlayers.has(player.id)) updatedPlayer.hasShield = true
-        if (survivorActors.has(player.id)) updatedPlayer.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
-        if (revivedPlayers.has(player.id)) updatedPlayer.isAlive = true
+        if (protectedPlayers.has(player.id)) {
+          updatedPlayer.hasShield = true
+        }
+
+        if (survivorActors.has(player.id)) {
+          updatedPlayer.survivorShields = Math.max((player.survivorShields || 0) - 1, 0)
+        }
+
+        if (revivedPlayers.has(player.id)) {
+          updatedPlayer.isAlive = true
+        }
 
         if (bombVictimIds.includes(player.id) && !revivedPlayers.has(player.id)) {
           updatedPlayer.isAlive = false
@@ -377,6 +427,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     newBombTargets = newBombTargets.filter((id) => !newDeaths.some((p) => p.id === id))
     setBombTargets(newBombTargets)
 
+    // Add kill notes for attackers
     nightActions
       .filter((a) => a.actionType === "KILL")
       .forEach((action) => {
@@ -389,6 +440,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         }
       })
 
+    // Add notes for players without actions
     const actedIds = new Set(nightActions.map((a) => a.playerId))
     players.forEach((p) => {
       if (p.isAlive && !actedIds.has(p.id)) {
@@ -398,13 +450,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
     setNightActions(updatedActions)
     setDeathsThisTurn(newDeaths)
-    if (newDeaths.length > 0) setDeathLog((prev) => [...prev, ...newDeaths])
+    if (newDeaths.length > 0) {
+      setDeathLog((prev) => [...prev, ...newDeaths])
+    }
   }, [nightActions, players, bombTargets, currentTurn, addPlayerNote])
 
-  /* --------------- Oylama çözümü --------------- */
+  /* -------------------- Oylama -------------------- */
   const processVotes = useCallback(() => {
     const voteCount: Record<string, number> = {}
-    const alivePlayers = players.filter((p) => p.isAlive)
+    players.forEach((p) => {
+      if (p.isAlive) voteCount[p.id] = 0
+    })
 
     Object.entries(votes).forEach(([voterId, targetId]) => {
       const voter = players.find((p) => p.id === voterId)
@@ -416,19 +472,20 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     let maxVotes = 0
     let eliminatedPlayerId: string | null = null
 
-    const entries = Object.entries(voteCount)
-    entries.forEach(([playerId, count]) => {
+    Object.entries(voteCount).forEach(([playerId, count]) => {
       if (count > maxVotes) {
         maxVotes = count
         eliminatedPlayerId = playerId
       }
     })
 
-    const topPlayers = entries.filter(([, count]) => count === maxVotes)
-    if (topPlayers.length > 1) eliminatedPlayerId = null
+    // tie: kimse elenmez
+    const topPlayers = Object.entries(voteCount).filter(([, count]) => count === maxVotes)
+    if (topPlayers.length > 1) {
+      eliminatedPlayerId = null
+    }
 
     const newDeaths: Player[] = []
-
     if (eliminatedPlayerId && maxVotes > 0) {
       setPlayers((prevPlayers) =>
         prevPlayers.map((player) => {
@@ -443,42 +500,61 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     }
 
     setDeathsThisTurn(newDeaths)
-    if (newDeaths.length > 0) setDeathLog((prev) => [...prev, ...newDeaths])
+    if (newDeaths.length > 0) {
+      setDeathLog((prev) => [...prev, ...newDeaths])
+    }
   }, [votes, players])
 
-  /* --------------- Faz ilerletme --------------- */
+  /* -------------------- Faz ilerlet -------------------- */
   const advancePhase = useCallback(() => {
-    const { winner, gameEnded } = getWinCondition(players)
+    const { winner, gameEnded } = localWinCondition(players)
 
     if (gameEnded) {
       setGame((prev) => (prev ? { ...prev, phase: "END", winningSide: winner as any, endedAt: new Date() } : null))
       setCurrentPhase("END")
       setTimeRemaining(0)
-      if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "END" })
+      if (isGameOwner) {
+        wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "END" })
+        setTimeout(broadcastSnapshot, 0)
+      }
       return
     }
 
     switch (currentPhase) {
-      case "ROLE_REVEAL":
+      case "ROLE_REVEAL": {
         setCurrentPhase("NIGHT")
         setTimeRemaining(game?.settings.nightDuration || 15)
-        if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT" })
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT" })
+          setTimeout(broadcastSnapshot, 0)
+        }
         break
+      }
 
-      case "NIGHT":
-        processNightActions()
+      case "NIGHT": {
+        if (isGameOwner) {
+          processNightActions()
+        }
         setCurrentPhase("NIGHT_RESULTS")
         setTimeRemaining(5)
-        if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT_RESULTS" })
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT_RESULTS" })
+          setTimeout(broadcastSnapshot, 0)
+        }
         break
+      }
 
-      case "NIGHT_RESULTS":
+      case "NIGHT_RESULTS": {
         setPlayers((prev) => prev.map((p) => ({ ...p, hasShield: false })))
         setCurrentPhase("DEATH_ANNOUNCEMENT")
         setTimeRemaining(5)
         setNightActions([])
-        if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DEATH_ANNOUNCEMENT" })
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DEATH_ANNOUNCEMENT" })
+          setTimeout(broadcastSnapshot, 0)
+        }
         break
+      }
 
       case "DEATH_ANNOUNCEMENT": {
         const alivePlayers = players.filter((p) => p.isAlive)
@@ -496,6 +572,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           setTimeRemaining(game?.settings.dayDuration || 15)
           if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DAY_DISCUSSION" })
         }
+        if (isGameOwner) setTimeout(broadcastSnapshot, 0)
         break
       }
 
@@ -511,38 +588,53 @@ export function useGameState(currentPlayerId: string): GameStateHook {
           setCurrentCardDrawer(null)
           if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "DAY_DISCUSSION" })
         }
+        if (isGameOwner) setTimeout(broadcastSnapshot, 0)
         break
       }
 
-      case "DAY_DISCUSSION":
+      case "DAY_DISCUSSION": {
         setCurrentPhase("VOTE")
         setTimeRemaining(game?.settings.voteDuration || 15)
-        if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "VOTE" })
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "VOTE" })
+          setTimeout(broadcastSnapshot, 0)
+        }
         break
+      }
 
-      case "VOTE":
+      case "VOTE": {
         processVotes()
         setCurrentPhase("RESOLVE")
         setTimeRemaining(3)
-        if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "RESOLVE" })
+        if (isGameOwner) {
+          wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "RESOLVE" })
+          setTimeout(broadcastSnapshot, 0)
+        }
         break
+      }
 
       case "RESOLVE": {
-        const { winner: newWinner, gameEnded: newGameEnded } = getWinCondition(players)
+        const { winner: newWinner, gameEnded: newGameEnded } = localWinCondition(players)
         if (newGameEnded) {
           setGame((prev) =>
             prev ? { ...prev, phase: "END", winningSide: newWinner as any, endedAt: new Date() } : null,
           )
           setCurrentPhase("END")
           setTimeRemaining(0)
-          if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "END" })
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "END" })
+            setTimeout(broadcastSnapshot, 0)
+          }
         } else {
           setCurrentTurn((prev) => prev + 1)
           setCurrentPhase("NIGHT")
           setTimeRemaining(game?.settings.nightDuration || 15)
           setDeathsThisTurn([])
           setVotes({})
-          if (isGameOwner) wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT" })
+          if (isGameOwner) {
+            wsClient.sendEvent("PHASE_CHANGED" as any, { phase: "NIGHT" })
+            setTimeout(broadcastSnapshot, 0)
+          }
         }
         break
       }
@@ -551,22 +643,24 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         break
     }
   }, [
+    players,
     currentPhase,
     game,
-    players,
-    processNightActions,
-    processVotes,
-    selectedCardDrawers,
-    currentCardDrawer,
     isGameOwner,
+    processNightActions,
+    broadcastSnapshot,
   ])
 
-  /* ----------- TDZ önleme: advancePhase ref ----------- */
+  /* ---- TDZ-safe timeout handler ---- */
   const advancePhaseRef = useRef<() => void>(() => {})
-  useEffect(() => { advancePhaseRef.current = advancePhase }, [advancePhase])
-  function handlePhaseTimeout() { advancePhaseRef.current() }
+  useEffect(() => {
+    advancePhaseRef.current = advancePhase
+  }, [advancePhase])
+  function handlePhaseTimeout() {
+    advancePhaseRef.current()
+  }
 
-  /* --------------- Vote & Action submit --------------- */
+  /* -------------------- Aksiyon Gönderimleri -------------------- */
   const submitNightAction = useCallback(
     (
       playerId: string,
@@ -583,12 +677,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         timestamp: new Date(),
       }
 
-      setNightActions((prev) => {
-        const next = [...prev.filter((a) => a.playerId !== playerId), newAction]
-        // herkese yayınla
-        wsClient.sendEvent("NIGHT_ACTION_UPDATED" as any, { actions: next })
-        return next
-      })
+      // Lokalde de tut
+      setNightActions((prev) => [...prev.filter((action) => action.playerId !== playerId), newAction])
+      // Sunucuya gönder → oda genelinde birikir ve yayınlanır
+      wsClient.sendEvent("NIGHT_ACTION_SUBMITTED" as any, { action: newAction })
     },
     [players],
   )
@@ -604,15 +696,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
         if (Object.keys(newVotes).length >= aliveCount) {
           setTimeRemaining(0)
         }
-        // yayınla
-        wsClient.sendEvent("VOTE_CAST" as any, { votes: newVotes })
         return newVotes
       })
+      // İstersen WS ile relay edebilirsin
+      // wsClient.sendEvent("VOTE_CAST" as any, { voterId, targetId })
     },
     [players],
   )
 
-  /* --------------- Reset --------------- */
   const resetGame = useCallback(() => {
     setGame(null)
     setPlayers([])
@@ -629,7 +720,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setPlayerNotes({})
   }, [])
 
-  /* --------------- Zamanlayıcı --------------- */
+  /* -------------------- Timer -------------------- */
   useEffect(() => {
     if (timeRemaining > 0) {
       const timer = setTimeout(() => setTimeRemaining((prev) => prev - 1), 1000)
@@ -641,81 +732,57 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       currentPhase !== "END" &&
       currentPhase !== "CARD_DRAWING"
     ) {
-      // Fazı owner sürüklüyor; diğerleri de aynı anda ilerlesin diye 100ms beklet
-      const phaseTimer = setTimeout(handlePhaseTimeout, 100)
-      return () => clearTimeout(phaseTimer)
+      const t = setTimeout(handlePhaseTimeout, 120)
+      return () => clearTimeout(t)
     }
   }, [timeRemaining, currentPhase])
 
-  /* --------------- WS Dinleyicileri --------------- */
+  /* -------------------- WS Listeners -------------------- */
   useEffect(() => {
-    // 1) OWNER tuşa basınca tüm odaya gelir
     const onGameStarted = (data: any) => {
-      // OWNER burada assignRoles + STATE_SNAPSHOT gönderecek; non-owner bekleyecek
       const payload = data?.payload || {}
       const startList: Player[] = payload.players || []
       const settings: GameSettings = payload.settings
 
-      // Bu client owner mı?
-      const me = startList.find((p) => p.id === currentPlayerId)
-      const iAmOwner = !!me?.isOwner
+      const meStart = startList.find((p) => p.id === currentPlayerId)
+      const iAmOwner = !!meStart?.isOwner
 
       if (iAmOwner && !game) {
         startGame(startList, settings)
       }
-      // Non-owner: STATE_SNAPSHOT’ı bekle (aşağıdaki listener)
+      // Non-owner: snapshot bekleyecek
     }
 
-    // 2) OWNER’ın otoritatif state’i
     const onSnapshot = (data: any) => {
       const snap = data?.payload
-      if (!snap) return
       applySnapshot(snap)
     }
 
-    // 3) Faz değişimi (owner publish)
     const onPhaseChanged = (data: any) => {
       const next = data?.payload?.phase as GamePhase | undefined
-      if (!next) return
-      // Owner’dan geldiği için doğrudan set
-      switch (next) {
-        case "NIGHT": setTimeRemaining(game?.settings.nightDuration || 15); break
-        case "DAY_DISCUSSION": setTimeRemaining(game?.settings.dayDuration || 15); break
-        case "VOTE": setTimeRemaining(game?.settings.voteDuration || 15); break
-        case "NIGHT_RESULTS": setTimeRemaining(5); break
-        case "DEATH_ANNOUNCEMENT": setTimeRemaining(5); break
-        case "RESOLVE": setTimeRemaining(3); break
-        case "END": setTimeRemaining(0); break
-      }
-      setCurrentPhase(next)
+      if (next) setCurrentPhase(next)
     }
 
-    // 4) Oy/aksiyon yayınları
-    const onVoteCast = (data: any) => {
-      const v = data?.payload?.votes
-      if (v) setVotes(v)
-    }
-    const onNightAction = (data: any) => {
-      const a = data?.payload?.actions as NightAction[] | undefined
-      if (a) setNightActions(a)
+    const onActionsUpdated = (data: any) => {
+      const arr = (data?.payload?.actions || []) as NightAction[]
+      const fixed = arr.map((a) => ({ ...a, timestamp: reviveDate(a.timestamp) as Date }))
+      setNightActions(fixed)
     }
 
     wsClient.on("GAME_STARTED" as any, onGameStarted)
     wsClient.on("STATE_SNAPSHOT" as any, onSnapshot)
     wsClient.on("PHASE_CHANGED" as any, onPhaseChanged)
-    wsClient.on("VOTE_CAST" as any, onVoteCast)
-    wsClient.on("NIGHT_ACTION_UPDATED" as any, onNightAction)
+    wsClient.on("NIGHT_ACTION_UPDATED" as any, onActionsUpdated)
 
     return () => {
       wsClient.off("GAME_STARTED" as any, onGameStarted)
       wsClient.off("STATE_SNAPSHOT" as any, onSnapshot)
       wsClient.off("PHASE_CHANGED" as any, onPhaseChanged)
-      wsClient.off("VOTE_CAST" as any, onVoteCast)
-      wsClient.off("NIGHT_ACTION_UPDATED" as any, onNightAction)
+      wsClient.off("NIGHT_ACTION_UPDATED" as any, onActionsUpdated)
     }
   }, [currentPlayerId, game, startGame, applySnapshot])
 
-  /* ---------------- Return ---------------- */
+  /* -------------------- Return API -------------------- */
   return {
     game,
     players,
@@ -731,8 +798,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     deathLog,
     bombTargets,
     playerNotes,
-    startGame,      // yalnızca OWNER tarafından çağrılır (GAME_STARTED geldiğinde)
-    advancePhase,   // OWNER fazı sürükler; yayınlar
+    startGame,
+    advancePhase,
     submitNightAction,
     submitVote,
     resetGame,
