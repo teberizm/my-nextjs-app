@@ -1,16 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { assignRoles, getRoleInfo } from "@/lib/game-logic";
+import { assignRoles } from "@/lib/game-logic";
+import { wsClient } from "@/lib/websocket-client";
 import type {
   GamePhase,
   Player,
   Game,
   GameSettings,
   NightAction,
-  PlayerRole,
 } from "@/lib/types";
-import { wsClient } from "@/lib/websocket-client";
 
 /** Hook dönen tip */
 interface GameStateHook {
@@ -44,29 +43,6 @@ interface GameStateHook {
   resetGame: () => void;
 }
 
-/** Basit kazanma kontrolü (client tarafında sadece gösterim amaçlı) */
-function getWinCondition(players: Player[]): { winner: string | null; gameEnded: boolean } {
-  const alive = players.filter((p) => p.isAlive);
-  const traitors = alive.filter((p) =>
-    ["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role as string),
-  );
-  const bombers = alive.filter((p) => p.role === "BOMBER");
-  const innocents = alive.filter(
-    (p) => !["EVIL_GUARDIAN", "EVIL_WATCHER", "EVIL_DETECTIVE"].includes(p.role as string) && p.role !== "BOMBER",
-  );
-
-  if (bombers.length > 0 && alive.length - bombers.length <= 1) {
-    return { winner: "BOMBER", gameEnded: true };
-  }
-  if (bombers.length === 0 && traitors.length >= innocents.length && traitors.length > 0) {
-    return { winner: "TRAITORS", gameEnded: true };
-  }
-  if (bombers.length === 0 && traitors.length === 0) {
-    return { winner: "INNOCENTS", gameEnded: true };
-  }
-  return { winner: null, gameEnded: false };
-}
-
 export function useGameState(currentPlayerId: string): GameStateHook {
   // ---- temel state
   const [game, setGame] = useState<Game | null>(null);
@@ -98,24 +74,37 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       if (Array.isArray(payload.players)) {
         setPlayers(payload.players);
       }
-      // Fazı PHASE_CHANGED belirleyecek.
+      // Fazı PHASE_CHANGED belirler.
     };
 
     const onPhaseChanged = (evt: any) => {
-      const { phase, phaseEndsAt, turn, selectedCardDrawers, currentCardDrawer } = evt?.payload || {};
+      const {
+        phase,
+        phaseEndsAt,
+        turn,
+        selectedCardDrawers,
+        currentCardDrawer,
+      } = evt?.payload || {};
       if (phase) setCurrentPhase(phase);
       if (typeof phaseEndsAt === "number") setPhaseEndsAt(phaseEndsAt);
       if (typeof turn === "number") setCurrentTurn(turn);
-      if (Array.isArray(selectedCardDrawers)) setSelectedCardDrawers(selectedCardDrawers);
-      if (typeof currentCardDrawer === "string" || currentCardDrawer === null)
+      if (Array.isArray(selectedCardDrawers))
+        setSelectedCardDrawers(selectedCardDrawers);
+      if (
+        typeof currentCardDrawer === "string" ||
+        currentCardDrawer === null
+      ) {
         setCurrentCardDrawer(currentCardDrawer ?? null);
+      }
     };
 
     const onSnapshot = (evt: any) => {
+      // Beklenen format: { type:"STATE_SNAPSHOT", payload:{ state: {...} } }
       const s = evt?.payload?.state;
       if (!s) return;
+
       if (Array.isArray(s.players)) setPlayers(s.players);
-      if (s.phase) setCurrentPhase(s.phase);
+      if (s.phase) setCurrentPhase(s.phase as GamePhase);
       if (typeof s.phaseEndsAt === "number") setPhaseEndsAt(s.phaseEndsAt);
       if (typeof s.currentTurn === "number") setCurrentTurn(s.currentTurn);
       if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
@@ -124,13 +113,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
       if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
       if (s.playerNotes) setPlayerNotes(s.playerNotes);
-      if (Array.isArray(s.selectedCardDrawers)) setSelectedCardDrawers(s.selectedCardDrawers);
-      if ("currentCardDrawer" in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
-      if (s.game) setGame(s.game);
+      if (Array.isArray(s.selectedCardDrawers))
+        setSelectedCardDrawers(s.selectedCardDrawers);
+      if ("currentCardDrawer" in s)
+        setCurrentCardDrawer(s.currentCardDrawer ?? null);
+      if (s.game) setGame(s.game as Game);
     };
 
     const onNightActions = (evt: any) => {
-      if (Array.isArray(evt?.payload?.actions)) setNightActions(evt.payload.actions);
+      if (Array.isArray(evt?.payload?.actions)) {
+        setNightActions(evt.payload.actions);
+      }
     };
 
     const onVotes = (evt: any) => {
@@ -181,7 +174,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     (gamePlayers: Player[], settings: GameSettings) => {
       if (!gamePlayers || gamePlayers.length === 0) return;
 
-      const amOwner = !!gamePlayers.find((p) => p.id === currentPlayerId && p.isOwner);
+      const amOwner = !!gamePlayers.find(
+        (p) => p.id === currentPlayerId && p.isOwner,
+      );
       if (!amOwner) return; // owner olmayan başlatmaz, server'dan bekler
 
       const playersWithRoles = assignRoles(gamePlayers, settings);
@@ -200,7 +195,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       setPlayers(playersWithRoles);
       setCurrentPhase("ROLE_REVEAL");
 
-      // authoritative broadcast
+      // authoritative broadcast -> server tüm odaya yayacak
       wsClient.sendEvent("GAME_STARTED" as any, {
         settings,
         players: playersWithRoles,
@@ -209,10 +204,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     [currentPlayerId],
   );
 
-  // ---- fazı client'tan atlatma: server otoriteli olduğu için boş bırak
+  // ---- fazı client'tan atlatma: server otoriteli olduğu için boş
   const advancePhase = useCallback(() => {
-    // İsterseniz hızlı geç için server'da SKIP_TIMER komutu ekleyip burada çağırabilirsiniz.
-    // wsClient.sendEvent("SKIP_TIMER" as any, {});
+    // Eğer server tarafında "REQUEST_ADVANCE" vb. endpoint eklediysen burada çağır.
+    // wsClient.sendEvent("REQUEST_ADVANCE" as any, {});
   }, []);
 
   // ---- herkesin night action'ı server'a gider
@@ -238,7 +233,10 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       };
 
       // local optimistic (UI’da "gönderildi" göstermek için)
-      setNightActions((prev) => [...prev.filter((a) => a.playerId !== playerId), action]);
+      setNightActions((prev) => [
+        ...prev.filter((a) => a.playerId !== playerId),
+        action,
+      ]);
 
       // authoritative -> server
       wsClient.sendEvent("NIGHT_ACTION_SUBMITTED" as any, { action });
