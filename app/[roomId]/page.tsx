@@ -132,6 +132,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   // 3) Lobideki buton aksiyonları
   // -----------------------------
   const handleStartGame = () => {
+    console.log('[ui] handleStartGame click by owner');
   if (gamePhase !== "LOBBY") return;
   wsClient.sendEvent("GAME_STARTED" as any, { ping: Date.now() }); // sadece tetik
   setGamePhase("ROLE_REVEAL"); // UI geçişi
