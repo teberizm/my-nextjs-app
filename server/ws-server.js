@@ -38,6 +38,7 @@ const toPlain = (obj) =>
 
 function broadcast(room, type, payload = {}) {
   const message = JSON.stringify({ type, payload, serverTime: now() });
+  console.log(`[WS→clients] ${type} → ${room.sockets.length} clients`);
   if (type === 'PHASE_CHANGED' || type === 'STATE_SNAPSHOT' || type === 'GAME_STARTED') {
     console.log('[WS→clients]', type, 'payload:', payload?.phase ?? payload);
   }
