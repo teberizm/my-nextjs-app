@@ -1,4 +1,4 @@
-// ws-server.js (authoritative server: timers + night actions + votes)
+// ws-server.js (authoritative server: timers + role assignment + timers + actions)
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -38,8 +38,8 @@ const toPlain = (obj) =>
 
 function broadcast(room, type, payload = {}) {
   const message = JSON.stringify({ type, payload, serverTime: now() });
-  if (type === 'PHASE_CHANGED' || type === 'STATE_SNAPSHOT') {
-    console.log('[WS→clients]', type, room.state?.phase, 'payload:', payload);
+  if (type === 'PHASE_CHANGED' || type === 'STATE_SNAPSHOT' || type === 'GAME_STARTED') {
+    console.log('[WS→clients]', type, 'payload:', payload?.phase ?? payload);
   }
   room.sockets.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) client.send(message);
@@ -66,9 +66,56 @@ function clearTimer(room) {
   }
 }
 
-/* ---------------- Game helpers ---------------- */
+/* ---------------- Role helpers (server-authoritative) ---------------- */
 const isTraitorRole = (role) =>
   role === 'EVIL_GUARDIAN' || role === 'EVIL_WATCHER' || role === 'EVIL_DETECTIVE';
+
+function assignRolesServer(players, settings) {
+  const shuffledPlayers = [...players].sort(() => Math.random() - 0.5);
+  const roles = [];
+
+  const innocentOnly = ['DOCTOR', 'DELI'];
+  const convertible = ['GUARDIAN', 'WATCHER', 'DETECTIVE'];
+  const special = ['BOMBER', 'SURVIVOR'];
+
+  const specialCount = Math.min(settings?.specialRoleCount ?? 0, players.length);
+  for (let i = 0; i < specialCount; i++) {
+    roles.push(special[Math.floor(Math.random() * special.length)]);
+  }
+
+  const allInnocent = [...innocentOnly, ...convertible];
+  while (roles.length < players.length) {
+    roles.push(allInnocent[Math.floor(Math.random() * allInnocent.length)]);
+  }
+
+  // convert some to traitor variants (never DELI)
+  const convertibleIdx = roles
+    .map((role, index) => ({ role, index }))
+    .filter((r) => convertible.includes(r.role));
+  const traitorCount = Math.min(settings?.traitorCount ?? 0, convertibleIdx.length);
+  convertibleIdx.sort(() => Math.random() - 0.5).slice(0, traitorCount).forEach(({ role, index }) => {
+    if (role === 'GUARDIAN') roles[index] = 'EVIL_GUARDIAN';
+    if (role === 'WATCHER') roles[index] = 'EVIL_WATCHER';
+    if (role === 'DETECTIVE') roles[index] = 'EVIL_DETECTIVE';
+  });
+
+  const shuffledRoles = roles.sort(() => Math.random() - 0.5);
+
+  return shuffledPlayers.map((p, i) => {
+    const role = shuffledRoles[i];
+    if (role === 'DELI') {
+      const innocent = ['DOCTOR', 'GUARDIAN', 'WATCHER', 'DETECTIVE'];
+      const fake = innocent[Math.floor(Math.random() * innocent.length)];
+      return { ...p, role, displayRole: fake, survivorShields: 0 };
+    }
+    return {
+      ...p,
+      role,
+      displayRole: role,
+      survivorShields: role === 'SURVIVOR' ? 2 : 0,
+    };
+  });
+}
 
 function getWinCondition(players) {
   const alive = players.filter((p) => p.isAlive);
@@ -143,12 +190,11 @@ function processNightActions(roomId) {
   guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
       blockedPlayers.add(a.targetId);
-      // note to target
       S.playerNotes[a.targetId] = [...(S.playerNotes[a.targetId] || []), `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`];
     }
   });
 
-  // 2) Resolve kills from unblocked killers
+  // 2) Kills
   const killers = S.nightActions.filter(
     (a) => a.actionType === 'KILL' && !blockedPlayers.has(a.playerId),
   );
@@ -177,7 +223,7 @@ function processNightActions(roomId) {
       }
     });
 
-  // 4) Bombs + survivors/protect/watch/detect notes (simplified)
+  // 4) Bombs + notes (short)
   const bombPlacers = S.nightActions.filter(
     (a) => a.actionType === 'BOMB_PLANT' && !blockedPlayers.has(a.playerId),
   );
@@ -200,10 +246,7 @@ function processNightActions(roomId) {
     let result = null;
 
     if (!actor) return { ...action };
-
-    if (blockedPlayers.has(actor.id)) {
-      return { ...action, result: { type: 'BLOCKED' } };
-    }
+    if (blockedPlayers.has(actor.id)) return { ...action, result: { type: 'BLOCKED' } };
 
     if (action.actionType === 'PROTECT' && actor.role !== 'DELI') {
       if ((actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') && action.targetId) {
@@ -226,8 +269,6 @@ function processNightActions(roomId) {
 
     if (action.actionType === 'INVESTIGATE' && target) {
       if (actor.role === 'DELI') {
-        // Deli: yanlış bilgi üretir
-        // basit fake: iki rastgele rol
         const pool = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
         const r1 = pool[Math.floor(Math.random()*pool.length)];
         let r2 = pool[Math.floor(Math.random()*pool.length)];
@@ -249,11 +290,8 @@ function processNightActions(roomId) {
       }
     }
 
-    if (action.actionType === 'BOMB_PLANT') {
-      result = { type: 'BOMB_PLANT' };
-    } else if (action.actionType === 'BOMB_DETONATE') {
-      detonateIndex = idx;
-    }
+    if (action.actionType === 'BOMB_PLANT') result = { type: 'BOMB_PLANT' };
+    else if (action.actionType === 'BOMB_DETONATE') detonateIndex = idx;
 
     // Notes
     if (result) {
@@ -309,60 +347,33 @@ function processNightActions(roomId) {
 
   // 6) Apply effects to players map (authoritative)
   const newPlayersMap = new Map(room.players);
-  Array.from(newPlayersMap.values()).forEach((pl) => {
-    pl.hasShield = false;
-  });
+  Array.from(newPlayersMap.values()).forEach((pl) => { pl.hasShield = false; });
 
-  // protect flags
-  protectedPlayers.forEach((pid) => {
-    const p = newPlayersMap.get(pid);
-    if (p) p.hasShield = true;
-  });
+  protectedPlayers.forEach((pid) => { const p = newPlayersMap.get(pid); if (p) p.hasShield = true; });
+  survivorActors.forEach((pid) => { const p = newPlayersMap.get(pid); if (p) p.survivorShields = Math.max((p.survivorShields || 0) - 1, 0); });
+  revived.forEach((pid) => { const p = newPlayersMap.get(pid); if (p) p.isAlive = true; });
 
-  // survivor shield decrement
-  survivorActors.forEach((pid) => {
-    const p = newPlayersMap.get(pid);
-    if (p) p.survivorShields = Math.max((p.survivorShields || 0) - 1, 0);
-  });
-
-  // revives
-  revived.forEach((pid) => {
-    const p = newPlayersMap.get(pid);
-    if (p) p.isAlive = true;
-  });
-
-  // deaths by bombs/kills
   Array.from(newPlayersMap.values()).forEach((p) => {
     if (bombVictimIds.includes(p.id) && !revived.has(p.id)) {
-      if (p.isAlive) {
-        p.isAlive = false;
-        newDeaths.push({ ...p });
-      }
+      if (p.isAlive) { p.isAlive = false; newDeaths.push({ ...p }); }
     } else if (targetedIds.includes(p.id) && !protectedPlayers.has(p.id) && !revived.has(p.id)) {
-      if (p.isAlive) {
-        p.isAlive = false;
-        newDeaths.push({ ...p });
-      }
+      if (p.isAlive) { p.isAlive = false; newDeaths.push({ ...p }); }
     }
   });
 
-  // write back players
   room.players = newPlayersMap;
 
   // attackers notes
-  S.nightActions
-    .filter((a) => a.actionType === 'KILL')
-    .forEach((a) => {
-      const actor = room.players.get(a.playerId);
-      const target = a.targetId ? room.players.get(a.targetId) : null;
-      if (actor && target) {
-        const killed = newDeaths.some((d) => d.id === target.id);
-        const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? ' ve öldürdün' : ''}`;
-        S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
-      }
-    });
+  S.nightActions.filter((a) => a.actionType === 'KILL').forEach((a) => {
+    const actor = room.players.get(a.playerId);
+    const target = a.targetId ? room.players.get(a.targetId) : null;
+    if (actor && target) {
+      const killed = newDeaths.some((d) => d.id === target.id);
+      const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? ' ve öldürdün' : ''}`;
+      S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
+    }
+  });
 
-  // no-action notes
   const actedIds = new Set(S.nightActions.map((a) => a.playerId));
   Array.from(room.players.values()).forEach((p) => {
     if (p.isAlive && !actedIds.has(p.id)) {
@@ -370,7 +381,6 @@ function processNightActions(roomId) {
     }
   });
 
-  // update state buckets
   S.nightActions = updatedActions;
   S.deathsThisTurn = newDeaths;
   if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
@@ -379,7 +389,6 @@ function processNightActions(roomId) {
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
 
-  // next phase
   startPhase(roomId, 'NIGHT_RESULTS', 5);
 }
 
@@ -388,7 +397,6 @@ function processVotes(roomId) {
   if (!room) return;
   const S = room.state;
   const players = Array.from(room.players.values());
-  const alive = players.filter((p) => p.isAlive);
 
   const voteCount = {};
   Object.entries(S.votes).forEach(([voterId, targetId]) => {
@@ -401,10 +409,7 @@ function processVotes(roomId) {
   let maxVotes = 0;
   let eliminatedId = null;
   Object.entries(voteCount).forEach(([pid, count]) => {
-    if (count > maxVotes) {
-      maxVotes = count;
-      eliminatedId = pid;
-    }
+    if (count > maxVotes) { maxVotes = count; eliminatedId = pid; }
   });
 
   const top = Object.entries(voteCount).filter(([, c]) => c === maxVotes);
@@ -414,10 +419,7 @@ function processVotes(roomId) {
   const newDeaths = [];
   if (eliminatedId && maxVotes > 0) {
     const target = newPlayersMap.get(eliminatedId);
-    if (target && target.isAlive) {
-      target.isAlive = false;
-      newDeaths.push({ ...target });
-    }
+    if (target && target.isAlive) { target.isAlive = false; newDeaths.push({ ...target }); }
   }
   room.players = newPlayersMap;
   S.deathsThisTurn = newDeaths;
@@ -433,7 +435,6 @@ function advancePhase(roomId) {
   const S = room.state;
   const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 0 };
 
-  // win check (before going further)
   const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()));
   if (gameEnded && S.phase !== 'END') {
     S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner };
@@ -445,40 +446,29 @@ function advancePhase(roomId) {
     case 'ROLE_REVEAL':
       startPhase(roomId, 'NIGHT', settings.nightDuration);
       break;
-
     case 'NIGHT':
       processNightActions(roomId);
       break;
-
     case 'NIGHT_RESULTS':
       startPhase(roomId, 'DEATH_ANNOUNCEMENT', 5);
       break;
-
     case 'DEATH_ANNOUNCEMENT':
-      if ((settings.cardDrawCount || 0) > 0) {
-        startPhase(roomId, 'CARD_DRAWING', 0);
-      } else {
-        startPhase(roomId, 'DAY_DISCUSSION', settings.dayDuration);
-      }
+      if ((settings.cardDrawCount || 0) > 0) startPhase(roomId, 'CARD_DRAWING', 0);
+      else startPhase(roomId, 'DAY_DISCUSSION', settings.dayDuration);
       break;
-
     case 'CARD_DRAWING':
       startPhase(roomId, 'DAY_DISCUSSION', settings.dayDuration);
       break;
-
     case 'DAY_DISCUSSION':
       startPhase(roomId, 'VOTE', settings.voteDuration);
       break;
-
     case 'VOTE':
       processVotes(roomId);
       break;
-
     case 'RESOLVE':
       S.currentTurn = (S.currentTurn || 1) + 1;
       startPhase(roomId, 'NIGHT', settings.nightDuration);
       break;
-    
     default:
       break;
   }
@@ -567,51 +557,51 @@ wss.on('connection', (ws) => {
         });
         break;
       }
+
       case 'STATE_SNAPSHOT': {
-  const room = rooms.get(rid);
-  if (!room) return;
-  const message = JSON.stringify({ type: 'STATE_SNAPSHOT', payload });
-  room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(message));
-  break;
-}
-case 'PHASE_CHANGED': {
-  const room = rooms.get(rid);
-  if (!room) return;
-  const message = JSON.stringify({ type: 'PHASE_CHANGED', payload });
-  room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(message));
-  break;
-}
+        const room = rooms.get(rid);
+        if (!room) return;
+        const messageToAll = JSON.stringify({ type: 'STATE_SNAPSHOT', payload });
+        room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(messageToAll));
+        break;
+      }
+      case 'PHASE_CHANGED': {
+        const room = rooms.get(rid);
+        if (!room) return;
+        const msg = JSON.stringify({ type: 'PHASE_CHANGED', payload });
+        room.sockets.forEach((client) => client.readyState === WebSocket.OPEN && client.send(msg));
+        break;
+      }
+
       case 'GAME_STARTED': {
         const room = rooms.get(rid);
         if (!room) return;
         if (room.state.phase !== 'LOBBY') break;
 
-        // 1) Settings
+        // 1) settings
         if (payload && payload.settings) {
           room.settings = { ...room.settings, ...payload.settings };
         }
 
-        // 2) Owner gönderdiği rolleri authoritative olarak kaydet (çok kritik!)
-        if (payload && Array.isArray(payload.players)) {
-          room.players = new Map(payload.players.map((p) => [p.id, p]));
-        }
+        // 2) players
+        let startPlayers = Array.isArray(payload?.players) ? payload.players : Array.from(room.players.values());
+
+        // (kritik) roller yoksa server dağıtsın
         const hasRoles =
-        payload &&
-        Array.isArray(payload.players) &&
-       payload.players.length > 0 &&
-       payload.players.every((p) => typeof p.role === 'string' && p.role.length > 0);
-       if (!hasRoles) {
-       console.warn('[WS] GAME_STARTED reddedildi: payload.players rolsüz.');
-       ws.send(JSON.stringify({
-       type: 'ERROR',
-       payload: { message: 'GAME_STARTED missing roles; owner must start from game controller' }
-        }));
-         break;
-         }
- // 2b) Rol atanmış listeyi authoritative olarak kaydet
-        room.players = new Map(payload.players.map((p) => [p.id, p]));
-        console.log('[WS] GAME_STARTED kabul edildi. Oyuncu sayısı:', room.players.size);
-        // 3) Reset state
+          startPlayers.length > 0 &&
+          startPlayers.every((p) => typeof p.role === 'string' && p.role.length > 0);
+
+        if (!hasRoles) {
+          startPlayers = assignRolesServer(startPlayers, room.settings);
+          console.log('[WS] Roles assigned on server for', startPlayers.length, 'players');
+        } else {
+          console.log('[WS] Roles provided by client for', startPlayers.length, 'players');
+        }
+
+        // authoritative write
+        room.players = new Map(startPlayers.map((p) => [p.id, { ...p, isAlive: p.isAlive ?? true }]));
+
+        // 3) reset state
         room.state.game = { startedAt: new Date() };
         room.state.currentTurn = 1;
         room.state.nightActions = [];
@@ -621,11 +611,11 @@ case 'PHASE_CHANGED': {
         room.state.bombTargets = [];
         room.state.playerNotes = {};
 
-        // 4) Faz
+        // 4) faz
         startPhase(rid, 'ROLE_REVEAL', 10);
 
-        // 5) Bilgilendirme
-        broadcast(room, 'GAME_STARTED', payload || {});
+        // 5) inform
+        broadcast(room, 'GAME_STARTED', { players: toPlain(startPlayers), settings: room.settings });
         break;
       }
 
@@ -649,7 +639,6 @@ case 'PHASE_CHANGED': {
           timestamp: new Date(),
         };
 
-        // replace previous action by same player
         room.state.nightActions = [
           ...room.state.nightActions.filter((a) => a.playerId !== fixed.playerId),
           fixed,
@@ -671,7 +660,7 @@ case 'PHASE_CHANGED': {
         broadcastSnapshot(rid);
         break;
       }
-      
+
       default:
         break;
     }
