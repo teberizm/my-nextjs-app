@@ -1,23 +1,23 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Vote, Users, Skull } from "lucide-react"
-import type { Player } from "@/lib/types"
-import { isTraitorRole } from "@/lib/game-logic"
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Vote, Users, Skull } from "lucide-react";
+import type { Player } from "@/lib/types";
+import { isTraitorRole } from "@/lib/game-logic";
 
 interface VotingPhaseProps {
-  currentPlayer: Player
-  allPlayers: Player[]
-  votes: Record<string, string>
-  onSubmitVote: (targetId: string) => void
-  timeRemaining: number
-  hasVoted: boolean
-  playerNotes: Record<string, string[]>
-  deaths: Player[]
+  currentPlayer: Player;
+  allPlayers: Player[];
+  votes: Record<string, string>;
+  onSubmitVote: (targetId: string) => void;
+  timeRemaining: number;
+  hasVoted: boolean;
+  playerNotes: Record<string, string[]>;
+  deaths: Player[];
 }
 
 export function VotingPhase({
@@ -30,12 +30,13 @@ export function VotingPhase({
   playerNotes,
   deaths,
 }: VotingPhaseProps) {
-  const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
+  const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
 
-  const alivePlayers = allPlayers.filter((p) => p.isAlive && p.id !== currentPlayer.id)
-  const totalVotes = Object.keys(votes).length
-  const aliveCount = allPlayers.filter((p) => p.isAlive).length
-  const notes = playerNotes[currentPlayer.id] || []
+  const alivePlayers = allPlayers.filter((p) => p.isAlive && p.id !== currentPlayer.id);
+  const totalVotes = Object.keys(votes).length;
+  const aliveCount = allPlayers.filter((p) => p.isAlive).length;
+  const notes = playerNotes[currentPlayer.id] || [];
+
   const renderGeneralNotes = () => (
     <Card className="bg-destructive/10 border-destructive/30 mb-6">
       <CardHeader>
@@ -58,7 +59,7 @@ export function VotingPhase({
         )}
       </CardContent>
     </Card>
-  )
+  );
 
   const getPlayerInitials = (name: string) => {
     return name
@@ -66,18 +67,19 @@ export function VotingPhase({
       .map((n) => n[0])
       .join("")
       .toUpperCase()
-      .slice(0, 2)
-  }
+      .slice(0, 2);
+  };
 
   const getVoteCount = (playerId: string) => {
-    return Object.values(votes).filter((vote) => vote === playerId).length
-  }
+    return Object.values(votes).filter((vote) => vote === playerId).length;
+  };
 
   const handleVote = () => {
     if (selectedTarget) {
-      onSubmitVote(selectedTarget)
+      console.log("[UI] SUBMIT_VOTE click ->", selectedTarget);
+      onSubmitVote(selectedTarget);
     }
-  }
+  };
 
   if (hasVoted) {
     return (
@@ -127,7 +129,7 @@ export function VotingPhase({
                 {allPlayers
                   .filter((p) => p.isAlive)
                   .map((player) => {
-                    const voteCount = getVoteCount(player.id)
+                    const voteCount = getVoteCount(player.id);
                     return (
                       <div
                         key={player.id}
@@ -150,14 +152,14 @@ export function VotingPhase({
                         </div>
                         <Badge variant={voteCount > 0 ? "destructive" : "secondary"}>{voteCount} oy</Badge>
                       </div>
-                    )
+                    );
                   })}
               </div>
             </CardContent>
           </Card>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -188,20 +190,20 @@ export function VotingPhase({
           </CardContent>
         </Card>
 
-          {notes.length > 0 && (
-            <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
-              <CardHeader>
-                <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-1 text-sm">
-                {notes.map((note, idx) => (
-                  <div key={idx}>{note}</div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+        {notes.length > 0 && (
+          <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
+            <CardHeader>
+              <CardTitle className="font-work-sans text-sm">Notlar</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-1 text-sm">
+              {notes.map((note, idx) => (
+                <div key={idx}>{note}</div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
-          {renderGeneralNotes()}
+        {renderGeneralNotes()}
 
         {/* Player Selection */}
         <Card className="neon-border bg-card/50 backdrop-blur-sm mb-6">
@@ -214,7 +216,7 @@ export function VotingPhase({
           <CardContent>
             <div className="space-y-3">
               {alivePlayers.map((player) => {
-                const voteCount = getVoteCount(player.id)
+                const voteCount = getVoteCount(player.id);
                 return (
                   <div
                     key={player.id}
@@ -226,25 +228,25 @@ export function VotingPhase({
                     onClick={() => setSelectedTarget(player.id)}
                   >
                     <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="w-10 h-10 border-2 border-primary/30">
-                        <AvatarFallback className="bg-primary/20 text-primary font-semibold">
-                          {getPlayerInitials(player.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="font-medium flex items-center gap-1">
-                          {player.name}
-                          {isTraitorRole(currentPlayer.role!) &&
-                            isTraitorRole(player.role!) && (
-                              <Skull className="w-3 h-3 text-destructive" />
-                            )}
+                      <div className="flex items-center gap-3">
+                        <Avatar className="w-10 h-10 border-2 border-primary/30">
+                          <AvatarFallback className="bg-primary/20 text-primary font-semibold">
+                            {getPlayerInitials(player.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <div className="font-medium flex items-center gap-1">
+                            {player.name}
+                            {isTraitorRole(currentPlayer.role!) &&
+                              isTraitorRole(player.role!) && (
+                                <Skull className="w-3 h-3 text-destructive" />
+                              )}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {player.hasShield && "🛡️ Korumalı"}
+                            {player.isMuted && "🔇 Susturulmuş"}
+                          </div>
                         </div>
-                        <div className="text-sm text-muted-foreground">
-                          {player.hasShield && "🛡️ Korumalı"}
-                          {player.isMuted && "🔇 Susturulmuş"}
-                        </div>
-                      </div>
                       </div>
                       {voteCount > 0 && (
                         <Badge variant="destructive" className="text-xs">
@@ -253,7 +255,7 @@ export function VotingPhase({
                       )}
                     </div>
                   </div>
-                )
+                );
               })}
             </div>
           </CardContent>
@@ -275,11 +277,18 @@ export function VotingPhase({
             Oy Ver
           </Button>
 
-          <Button onClick={() => onSubmitVote("SKIP")} variant="outline" className="w-full">
+          <Button
+            onClick={() => {
+              console.log("[UI] SUBMIT_VOTE click -> SKIP");
+              onSubmitVote("SKIP");
+            }}
+            variant="outline"
+            className="w-full"
+          >
             Bu Turda Kimseyi Elememe
           </Button>
         </div>
       </div>
     </div>
-  )
+  );
 }
