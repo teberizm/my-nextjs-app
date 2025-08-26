@@ -1,9 +1,8 @@
-"use client"
+"use client";
 
-import { EventEmitter } from "events"
-import type { Player } from "./types"
+import { EventEmitter } from "events";
+import type { Player } from "./types";
 
-// Olası tüm event tiplerini toplu tanımlayalım (server/client’ta kullandıklarımız)
 export type GameEvent =
   | "ROOM_JOINED"
   | "PLAYER_LIST_UPDATED"
@@ -31,118 +30,172 @@ export type GameEvent =
   | "KICK_PLAYER"
   | "CONNECTION_STATUS"
   | "ERROR"
+  // server-only types we still pass through
+  | "JOIN_ROOM";
 
 export interface GameEventData {
-  type: GameEvent
-  payload: any
-  timestamp: Date
-  roomId?: string
-  gameId?: string
-  playerId?: string
+  type: GameEvent;
+  payload: any;
+  timestamp: Date;
+  roomId?: string;
+  gameId?: string;
+  playerId?: string;
 }
 
-/** URL’i güvenli şekilde hesapla (env > window origin > local fallback) */
+/** WS URL kuralları:
+ *  - NEXT_PUBLIC_WS_URL tanımlıysa onu kullan (ör: wss://play.tebova.com/ws)
+ *  - Aksi halde tarayıcıdaysak ws(s)://<hostname>:3001
+ *  - SSR fallback: ws://127.0.0.1:3001
+ */
 function computeWsUrl(): string {
-  const envUrl = process.env.NEXT_PUBLIC_WS_URL
-  if (envUrl && typeof envUrl === "string" && envUrl.startsWith("ws")) {
-    return envUrl
+  const envUrl = process.env.NEXT_PUBLIC_WS_URL;
+  if (envUrl && typeof envUrl === "string" && (envUrl.startsWith("ws://") || envUrl.startsWith("wss://"))) {
+    return envUrl;
   }
-
   if (typeof window !== "undefined") {
-    const isSecure = window.location.protocol === "https:"
-    const proto = isSecure ? "wss" : "ws"
-    // Aynı host + /socket path
-    return `${proto}://${window.location.host}/socket`
+    const isSecure = window.location.protocol === "https:";
+    const proto = isSecure ? "wss" : "ws";
+    const host = window.location.hostname; // port eklemeyelim, 3001'i sabit veriyoruz
+    return `${proto}://${host}:3001`;
   }
-
-  // SSR / fallback (lokal dev server)
-  return "ws://127.0.0.1:3001"
+  return "ws://127.0.0.1:3001";
 }
+
+type Handler = (evt: any) => void;
 
 export class WebSocketClient extends EventEmitter {
-  private socket: WebSocket | null = null
-  private roomId: string | null = null
-  private player: Player | null = null
+  private socket: WebSocket | null = null;
+  private roomId: string | null = null;
+  private player: Player | null = null;
 
+  /** Bağlantı açılana dek gönderilecek mesajların kuyruğu */
+  private outbox: Array<{ type: GameEvent; payload?: any; roomId?: string; playerId?: string }> = [];
+
+  /** Tekrar connect çağrılırsa aynı soketi yeniden kullanır */
   connect(roomId: string, player: Player) {
-    this.roomId = roomId
-    this.player = player
+    this.roomId = roomId;
+    this.player = player;
 
-    const url = computeWsUrl()
-    console.log("[ws] connecting to:", url)
+    // Açık bir soket varsa ve OPEN ise sadece JOIN gönder
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.sendRaw({ type: "JOIN_ROOM", payload: { roomId, player }, roomId, playerId: player.id });
+      // Katılır katılmaz tam senkron için:
+      this.sendEvent("REQUEST_SNAPSHOT", {});
+      return;
+    }
+
+    const url = computeWsUrl();
+    console.log("[ws] connecting to:", url);
 
     try {
-      this.socket = new WebSocket(url)
+      this.socket = new WebSocket(url);
     } catch (err) {
-      console.error("[ws] invalid WebSocket URL:", url, err)
-      this.emit("ERROR", { message: "Invalid WebSocket URL", url })
-      return
+      console.error("[ws] invalid WebSocket URL:", url, err);
+      this.emit("ERROR", { message: "Invalid WebSocket URL", url });
+      return;
     }
 
     this.socket.onopen = () => {
-      console.log("[ws] open")
-      this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() })
+      console.log("[ws] open", url);
+      this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() });
+
       // Odaya katıl
-      this.sendEvent("JOIN_ROOM", { roomId, player })
-    }
+      this.sendRaw({ type: "JOIN_ROOM", payload: { roomId, player }, roomId, playerId: player.id });
 
-    this.socket.onclose = (ev) => {
-      console.warn("[ws] close", { code: ev.code, reason: ev.reason })
-      this.emit("CONNECTION_STATUS", { connected: false, timestamp: new Date() })
-    }
+      // Snapshot iste (bazı yerlerde ayrıca isteniyor; iki kez gelse de sorun değil)
+      this.sendEvent("REQUEST_SNAPSHOT", {});
 
-    this.socket.onerror = (ev) => {
-      console.error("[ws] error", ev)
-      this.emit("ERROR", { message: "WebSocket error", event: ev })
-    }
+      // Outbox'ı flush et
+      if (this.outbox.length > 0) {
+        const pending = [...this.outbox];
+        this.outbox = [];
+        pending.forEach((m) => this.sendRaw({ ...m, roomId: m.roomId ?? this.roomId ?? roomId, playerId: m.playerId ?? this.player?.id }));
+      }
+    };
 
     this.socket.onmessage = (event: MessageEvent) => {
+      let data: any;
       try {
-        const data = JSON.parse(event.data as string)
-        // Debug için istersen aç: console.log("[ws] message", data.type, data)
-        this.emit(data.type, { ...data, timestamp: new Date() })
+        data = JSON.parse(event.data as string);
       } catch (e) {
-        console.error("[ws] invalid message", e, event.data)
+        console.error("[ws] invalid message JSON", e, event.data);
+        return;
       }
-    }
+      const { type } = data || {};
+      // Debug log:
+      console.log("[server→ws]", type, data?.payload ?? "");
+
+      // EventEmitter ile dışarı yayınla
+      this.emit(type, { ...data, timestamp: new Date() });
+    };
+
+    this.socket.onclose = (ev) => {
+      console.warn("[ws] close", { code: ev.code, reason: ev.reason });
+      this.emit("CONNECTION_STATUS", { connected: false, timestamp: new Date() });
+    };
+
+    this.socket.onerror = (ev) => {
+      console.error("[ws] error", ev);
+      this.emit("ERROR", { message: "WebSocket error", event: ev });
+    };
   }
 
   disconnect() {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      try {
-        this.socket.close()
-      } catch {}
-    }
-    this.socket = null
-    this.roomId = null
-    this.player = null
+    try {
+      if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+        this.socket.close();
+      }
+    } catch {}
+    this.socket = null;
+    this.roomId = null;
+    this.player = null;
+    this.outbox = [];
   }
 
+  /** Kullan: wsClient.sendEvent("SUBMIT_VOTE", { targetId }) */
   sendEvent(eventType: GameEvent, payload: any) {
-    if (!this.socket) {
-      console.warn("[ws] sendEvent: no socket", eventType)
-      this.emit("ERROR", { message: "Socket is not created", eventType })
-      return
-    }
-    if (this.socket.readyState !== WebSocket.OPEN) {
-      console.warn("[ws] sendEvent while not open:", eventType)
-      this.emit("ERROR", { message: "Not connected to server", eventType })
-      return
-    }
-
     const msg = {
       type: eventType,
-      payload,
-      roomId: this.roomId,
-      playerId: this.player?.id,
+      payload: payload ?? {},
+      roomId: this.roomId ?? undefined,
+      playerId: this.player?.id ?? undefined,
+    };
+
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      // Bağlı değilken güvenle kuyruğa al
+      console.warn("[ws] queueing (socket not open):", eventType, msg);
+      this.outbox.push(msg);
+      return;
+    }
+
+    this.sendRaw(msg);
+  }
+
+  /** Düşük seviye gönderim (OPEN değilse outbox’a bırakır) */
+  private sendRaw(obj: { type: GameEvent; payload?: any; roomId?: string; playerId?: string }) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.outbox.push(obj);
+      return;
     }
     try {
-      this.socket.send(JSON.stringify(msg))
+      this.socket.send(JSON.stringify(obj));
+      // Debug için:
+      console.log("[ws→server]", obj.type, obj);
     } catch (e) {
-      console.error("[ws] sendEvent failed", e, msg)
-      this.emit("ERROR", { message: "Failed to send event", eventType, error: String(e) })
+      console.error("[ws] send error", e, obj);
+      this.emit("ERROR", { message: "Failed to send event", eventType: obj.type, error: String(e) });
     }
+  }
+
+  /** Event abonelikleri (EventEmitter kullanımıyla uyumlu) */
+  on(type: GameEvent | string, fn: Handler) {
+    return super.on(type, fn);
+  }
+  off(type: GameEvent | string, fn: Handler) {
+    // @ts-ignore
+    return super.off(type, fn);
   }
 }
 
-export const wsClient = new WebSocketClient()
+export const wsClient = new WebSocketClient();
+export default wsClient;
