@@ -72,23 +72,26 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     const onGameStarted = (evt: any) => {
   const payload = evt?.payload || {};
 
-  // Ayarlar
+  // Ayarlar herkeste güncellensin
   if (payload.settings) {
-    setGame((prev) => ({
-      ...(prev || {
-        id: Math.random().toString(36).slice(2),
-        startedAt: new Date(),
-      }),
-      settings: payload.settings,
-    }));
+    setGame((prev) =>
+      prev
+        ? { ...prev, settings: payload.settings }
+        : {
+            id: Math.random().toString(36).slice(2),
+            roomId: payload.roomId ?? "",
+            phase: "ROLE_REVEAL",
+            currentTurn: 1,
+            settings: payload.settings,
+            seed: Math.random().toString(36).slice(2),
+            startedAt: new Date(),
+          },
+    );
   }
 
-  // Oyuncular
   if (Array.isArray(payload.players)) {
     setPlayers(payload.players);
   }
-
-  // Faz yine server’ın PHASE_CHANGED eventinden güncellenecek
 };
 
     const onPhaseChanged = (evt: any) => {
