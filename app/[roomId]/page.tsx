@@ -34,10 +34,9 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     dayDuration: 120,
     voteDuration: 45,
   });
-  const [game, setGame] = useState<any | null>(null);
 
-  // --- Kart çekme akışına dair istemci durumları (basit) ---
-  const [currentCardDrawer, setCurrentCardDrawer] = useState<string | null>(null);
+  // Not: Game tipi import edilmediği için derlemeyi engellememesi adına any kullandık
+  const [game, setGame] = useState<any | null>(null);
 
   // Odaya giriş (sadece kendi kimliğimizi oluşturuyoruz; oyuncu listesi sunucudan gelecek)
   const handleJoin = (name: string, isAdmin: boolean, password?: string): boolean => {
@@ -90,19 +89,19 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     // Oyun başladı → sunucunun gönderdiği ayarları al
     const onGameStarted = (data: any) => {
       const settings = data?.payload?.settings as GameSettings | undefined;
-      if (settings) setGameSettings(settings);
+      if (settings) {
+        setGameSettings(settings);
+      }
+      // Faz geçişini server PHASE_CHANGED ile yapacak
       console.log("[client] GAME_STARTED received");
     };
 
     const onPhaseChanged = (data: any) => {
       const next = data?.payload?.phase as GamePhase | undefined;
-      const drawer = data?.payload?.currentCardDrawer ?? null;
       if (next) {
         console.log("[client] PHASE_CHANGED", data.payload);
         setGamePhase(next);
       }
-      // kart çekme sırasında sıradaki oyuncu id'sini tutalım (bekleme ekranı için)
-      setCurrentCardDrawer(drawer);
     };
 
     // Sunucu snapshot (oyuncular + faz). (Not: settings snapshot içinde gelmiyor.)
@@ -114,41 +113,17 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       if (Array.isArray(s.players)) {
         setCurrentRoom((prev) => ({ ...prev, players: s.players }));
       }
-      if (s.phase) setGamePhase(s.phase as GamePhase);
-      if ("currentCardDrawer" in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
+      if (s.phase) {
+        setGamePhase(s.phase as GamePhase);
+      }
     };
 
-    // 🔥 Ayarlar güncellendi → tüm istemcilerde UI'ı senkronla
+    // 🔥 Kritik: Ayarlar güncellendi → tüm istemcilerde UI'ı senkronla
     const onSettingsUpdated = (data: any) => {
       const settings = data?.payload?.settings as GameSettings | undefined;
-      if (settings) setGameSettings(settings);
-    };
-
-    // --- Kart çekme akışı: sadece sırası gelen oyuncuya özel mesajlar ---
-    const onCardDrawReady = () => {
-      // Basit test akışı: prompt ile QR (token) iste
-      const token = typeof window !== "undefined" ? window.prompt("QR kodunu okut / değeri gir:") : null;
-      if (token && token.trim().length > 0) {
-        wsClient.sendEvent("CARD_QR_SCANNED", { token: token.trim() });
+      if (settings) {
+        setGameSettings(settings);
       }
-    };
-
-    const onCardPreview = (data: any) => {
-      const { text, effectId, error } = data?.payload || {};
-      if (error) {
-        if (typeof window !== "undefined") window.alert(error);
-        return;
-      }
-      // Basit onay: “TAMAM!” deyince CARD_CONFIRM gönder
-      const ok = typeof window !== "undefined" ? window.confirm(String(text || "Kart")) : true;
-      if (ok && effectId) {
-        wsClient.sendEvent("CARD_CONFIRM", { effectId });
-      }
-    };
-
-    const onCardAppliedPrivate = (data: any) => {
-      console.log("[client] CARD_APPLIED_PRIVATE", data?.payload);
-      // İstersen burada küçük bir toast gösterebilirsin
     };
 
     // --- Subscribe ---
@@ -159,10 +134,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     wsClient.on("STATE_SNAPSHOT", onSnapshot);
     wsClient.on("SETTINGS_UPDATED", onSettingsUpdated);
 
-    wsClient.on("CARD_DRAW_READY", onCardDrawReady);
-    wsClient.on("CARD_PREVIEW", onCardPreview);
-    wsClient.on("CARD_APPLIED_PRIVATE", onCardAppliedPrivate);
-
     // --- Cleanup ---
     return () => {
       wsClient.off("PLAYER_LIST_UPDATED", onPlayerList);
@@ -171,11 +142,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       wsClient.off("PHASE_CHANGED", onPhaseChanged);
       wsClient.off("STATE_SNAPSHOT", onSnapshot);
       wsClient.off("SETTINGS_UPDATED", onSettingsUpdated);
-
-      wsClient.off("CARD_DRAW_READY", onCardDrawReady);
-      wsClient.off("CARD_PREVIEW", onCardPreview);
-      wsClient.off("CARD_APPLIED_PRIVATE", onCardAppliedPrivate);
-
       wsClient.disconnect();
     };
   }, [currentPlayer, currentRoom.inviteCode]);
@@ -245,8 +211,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
           gameSettings={game?.settings ?? gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
-          // İstersen GameController içinde bekleme yazısı için bu bilgiyi kullan:
-          // currentCardDrawer={currentCardDrawer}
         />
       )}
     </>
