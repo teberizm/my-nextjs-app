@@ -694,6 +694,19 @@ wss.on('connection', (ws) => {
         }
         break;
       }
+        case "UPDATE_SETTINGS": {
+  if (!rid) return;
+  const room = rooms.get(rid);
+  if (!room) return;
+
+  // Sadece owner değiştirebilsin
+  if (ws.playerId !== room.ownerId) return;
+
+  room.settings = { ...room.settings, ...payload.settings };
+
+  broadcast(room, "SETTINGS_UPDATED", { settings: room.settings });
+  break;
+}
       case "RESET_GAME": {
   if (!rid) break;
   const room = rooms.get(rid);
