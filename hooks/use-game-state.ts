@@ -70,12 +70,26 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   // ---- WS dinleyicileri (tek otorite: sunucu)
   useEffect(() => {
     const onGameStarted = (evt: any) => {
-      const payload = evt?.payload || {};
-      if (Array.isArray(payload.players)) {
-        setPlayers(payload.players);
-      }
-      // Fazı PHASE_CHANGED belirler.
-    };
+  const payload = evt?.payload || {};
+
+  // Ayarlar
+  if (payload.settings) {
+    setGame((prev) => ({
+      ...(prev || {
+        id: Math.random().toString(36).slice(2),
+        startedAt: new Date(),
+      }),
+      settings: payload.settings,
+    }));
+  }
+
+  // Oyuncular
+  if (Array.isArray(payload.players)) {
+    setPlayers(payload.players);
+  }
+
+  // Faz yine server’ın PHASE_CHANGED eventinden güncellenecek
+};
 
     const onPhaseChanged = (evt: any) => {
       console.log('[client] PHASE_CHANGED', evt?.payload);
@@ -315,7 +329,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     [players],
   );
 
-  const resetGame = useCallback(() => {
+  useEffect(() => {
+  const onReset = () => {
     setGame(null);
     setPlayers([]);
     setCurrentPhase("LOBBY");
@@ -330,8 +345,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     setDeathLog([]);
     setBombTargets([]);
     setPlayerNotes({});
-  }, []);
+  };
 
+  wsClient.on("RESET_GAME", onReset);
+  return () => wsClient.off("RESET_GAME", onReset);
+}, []);
   return {
     game,
     players,
