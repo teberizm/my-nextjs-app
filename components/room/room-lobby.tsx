@@ -74,9 +74,16 @@ export function RoomLobby({
   }
 
   const saveSettings = () => {
-    onUpdateSettings(tempSettings)
-    setShowSettings(false)
-  }
+  // Local state güncelle
+  onUpdateSettings(tempSettings);
+
+  // Server’a bildir → herkesin senkronize olması için
+  wsClient.sendEvent("UPDATE_SETTINGS" as any, {
+    settings: tempSettings,
+  });
+
+  setShowSettings(false);
+};
 
   const resetSettings = () => {
     setTempSettings(gameSettings)
