@@ -16,9 +16,6 @@ export type GameEvent =
   | "VOTES_UPDATED"
   | "NOTES_UPDATED"
   | "ROLE_ASSIGNED_PRIVATE"
-  | "RANDOM_PLAYERS_PICKED_FOR_CARD"
-  | "CARD_SCANNED"
-  | "CARD_APPLIED"
   | "VOTE_OPENED"
   | "VOTE_CAST"
   | "VOTE_RESULT"
@@ -30,6 +27,19 @@ export type GameEvent =
   | "KICK_PLAYER"
   | "CONNECTION_STATUS"
   | "ERROR"
+  | "UPDATE_SETTINGS"
+  | "SETTINGS_UPDATED"
+  | "RESET_GAME"
+  // === Card draw (new) ===
+  | "CARD_DRAW_READY"          // server → only current drawer
+  | "CARD_QR_SCANNED"          // client → server { token }
+  | "CARD_PREVIEW"             // server → only current drawer { text, effectId } | { error }
+  | "CARD_CONFIRM"             // client → server { effectId }
+  | "CARD_APPLIED_PRIVATE"     // server → only current drawer { result }
+  // legacy aliases kept (no harm if unused)
+  | "RANDOM_PLAYERS_PICKED_FOR_CARD"
+  | "CARD_SCANNED"
+  | "CARD_APPLIED"
   // server-only types we still pass through
   | "JOIN_ROOM";
 
@@ -44,7 +54,7 @@ export interface GameEventData {
 
 /** WS URL kuralları:
  *  - NEXT_PUBLIC_WS_URL tanımlıysa onu kullan (ör: wss://play.tebova.com/ws)
- *  - Aksi halde tarayıcıdaysak ws(s)://<hostname>:3001
+ *  - Aksi halde tarayıcıdaysak ws(s)://<hostname>/socket  (reverse proxy kullanıyorsan)
  *  - SSR fallback: ws://127.0.0.1:3001
  */
 function computeWsUrl(): string {
@@ -55,7 +65,8 @@ function computeWsUrl(): string {
   if (typeof window !== "undefined") {
     const isSecure = window.location.protocol === "https:";
     const proto = isSecure ? "wss" : "ws";
-    const host = window.location.host; // dikkat: host = domain + port (eğer varsa)
+    const host = window.location.host; // host = domain[:port]
+    // Eğer doğrudan 3001'e bağlanıyorsan burada "/socket" yerine ":3001" kullan.
     return `${proto}://${host}/socket`;
   }
   return "ws://127.0.0.1:3001";
@@ -109,7 +120,13 @@ export class WebSocketClient extends EventEmitter {
       if (this.outbox.length > 0) {
         const pending = [...this.outbox];
         this.outbox = [];
-        pending.forEach((m) => this.sendRaw({ ...m, roomId: m.roomId ?? this.roomId ?? roomId, playerId: m.playerId ?? this.player?.id }));
+        pending.forEach((m) =>
+          this.sendRaw({
+            ...m,
+            roomId: m.roomId ?? this.roomId ?? roomId,
+            playerId: m.playerId ?? this.player?.id,
+          }),
+        );
       }
     };
 
@@ -147,12 +164,12 @@ export class WebSocketClient extends EventEmitter {
       }
     } catch {}
     this.socket = null;
-    this.roomId = null;
+       this.roomId = null;
     this.player = null;
     this.outbox = [];
   }
 
-  /** Kullan: wsClient.sendEvent("SUBMIT_VOTE", { targetId }) */
+  /** Genel amaçlı gönderim: wsClient.sendEvent("SUBMIT_VOTE", { targetId }) gibi */
   sendEvent(eventType: GameEvent, payload: any) {
     const msg = {
       type: eventType,
@@ -194,6 +211,14 @@ export class WebSocketClient extends EventEmitter {
   off(type: GameEvent | string, fn: Handler) {
     // @ts-ignore
     return super.off(type, fn);
+  }
+
+  // ------ Convenience helpers for card flow ------
+  sendCardQrScanned(token: string) {
+    this.sendEvent("CARD_QR_SCANNED", { token });
+  }
+  sendCardConfirm(effectId: string) {
+    this.sendEvent("CARD_CONFIRM", { effectId });
   }
 }
 
