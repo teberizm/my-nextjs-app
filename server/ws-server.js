@@ -1,4 +1,4 @@
-// ws-server.js (authoritative server: timers + roles + actions + votes)
+// ws-server.js (authoritative server: timers + roles + actions + votes + QR card draw)
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -24,7 +24,11 @@ const wss = new WebSocket.Server({ server });
  *     bombTargets: string[],
  *     playerNotes: Record<string, string[]>,
  *     game: { startedAt: Date, endedAt?: Date, winningSide?: string } | null,
- *     phaseEndsAt: number // epoch ms
+ *     phaseEndsAt: number,
+ *     // Card drawing
+ *     selectedCardDrawers: string[],
+ *     currentCardDrawerIndex: number,
+ *     currentCardDrawer: string | null
  *   },
  *   timer: NodeJS.Timeout | null
  * }
@@ -36,6 +40,60 @@ const now = () => Date.now();
 const toPlain = (obj) =>
   JSON.parse(JSON.stringify(obj, (k, v) => (v instanceof Date ? v.toISOString() : v)));
 
+/* ---------------- QR Card Pool (example: 2 IDs x 3 events) ---------------- */
+const QR_CARDS = {
+  "94138491230": [
+    { effectId: "REVIVE_RANDOM_FROM_DEATHS_THIS_TURN", text: "Eğer bu tur birisi öldüyse, ölenler arasından rastgele 1 kişiyi dirilt." },
+    { effectId: "GIVE_RANDOM_ALIVE_SHIELD", text: "Rastgele bir canlı oyuncuya kalkan ver (bu gece korur)." },
+    { effectId: "NO_OP", text: "Boş kart. Hiçbir şey olmaz." },
+  ],
+  "94138491231": [
+    { effectId: "GIVE_RANDOM_ALIVE_SHIELD", text: "Rastgele bir canlı oyuncuyu koru (kalkan)." },
+    { effectId: "REVIVE_RANDOM_FROM_DEATHS_THIS_TURN", text: "Bu tur ölenlerden birini rastgele dirilt." },
+    { effectId: "NO_OP", text: "Boş kart. Hiçbir şey olmaz." },
+  ],
+};
+function randPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function sendToPlayer(room, playerId, type, payload) {
+  for (const s of room.sockets) {
+    if (s.readyState === WebSocket.OPEN && s.playerId === playerId) {
+      s.send(JSON.stringify({ type, payload, serverTime: now() }));
+      break;
+    }
+  }
+}
+/* Effects are applied authoritatively on server */
+function applyCardEffect(room, effectId) {
+  const S = room.state;
+  const players = Array.from(room.players.values());
+
+  switch (effectId) {
+    case "REVIVE_RANDOM_FROM_DEATHS_THIS_TURN": {
+      const deaths = Array.isArray(S.deathsThisTurn) ? S.deathsThisTurn : [];
+      if (deaths.length === 0) return { ok: false, note: "Bu tur kimse ölmedi." };
+      const target = randPick(deaths);
+      const p = room.players.get(target.id);
+      if (p) {
+        p.isAlive = true;
+        S.playerNotes[p.id] = [...(S.playerNotes[p.id] || []), `${S.currentTurn}. Gün: Kart ile dirildin`];
+      }
+      return { ok: true, revivedId: target.id };
+    }
+    case "GIVE_RANDOM_ALIVE_SHIELD": {
+      const alive = players.filter(p => p.isAlive);
+      if (alive.length === 0) return { ok: false, note: "Canlı oyuncu yok." };
+      const tgt = randPick(alive);
+      const p = room.players.get(tgt.id);
+      if (p) p.hasShield = true;
+      return { ok: true, shieldedId: tgt.id };
+    }
+    case "NO_OP":
+    default:
+      return { ok: true, noop: true };
+  }
+}
+
+/* ---------------- Broadcast helpers ---------------- */
 function broadcast(room, type, payload = {}) {
   const message = JSON.stringify({ type, payload, serverTime: now() });
   const count = room.sockets ? room.sockets.size : 0;
@@ -87,7 +145,7 @@ function assignRolesServer(players, settings) {
 
   const allInnocent = [...innocentOnly, ...convertible];
   while (roles.length < players.length) {
-    roles.push(allInnocent[Math.floor(Math.random() * allInnocent.length)]);
+    roles.push(allInnocent[Math.floor(Math.random() * all innoc ent.length)]);
   }
 
   // convert some to traitor variants (never DELI)
@@ -151,12 +209,27 @@ function startPhase(roomId, phase, durationSec) {
     room.state.deathsThisTurn = [];
   }
   if (phase === 'VOTE') {
-    // Her oy turu başında oy tablosu temiz olsun
     room.state.votes = {};
   }
 
   room.state.phase = phase;
   room.state.phaseEndsAt = now() + Math.max(0, durationSec) * 1000;
+
+  // 🔽 Kart çekme fazına girerken: 1 canlı oyuncu seç, yalnız ona READY gönder
+  if (phase === 'CARD_DRAWING') {
+    const S = room.state;
+    const alive = Array.from(room.players.values()).filter(p => p.isAlive);
+    const count = Math.min(1, alive.length); // şimdilik 1'e sabit
+    const order = alive.map(p => p.id).sort(() => Math.random() - 0.5).slice(0, count);
+    S.selectedCardDrawers = order;
+    S.currentCardDrawerIndex = 0;
+    S.currentCardDrawer = order[0] || null;
+    if (S.currentCardDrawer) {
+      sendToPlayer(room, S.currentCardDrawer, "CARD_DRAW_READY", {
+        message: "Kamerayı aç ve QR kartını okut.",
+      });
+    }
+  }
 
   broadcast(room, 'PHASE_CHANGED', {
     phase,
@@ -438,24 +511,21 @@ function processVotes(roomId) {
   S.deathsThisTurn = newDeaths;
   if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
 
-  // 🔥 Yeni ekleme: sonuçları client’a gönder
   broadcast(room, "VOTE_RESULT", {
-    votes: S.votes,          // kim kime oy verdi
-    voteCount: voteCount,    // aday başına oy sayısı
+    votes: S.votes,
+    voteCount: voteCount,
     eliminatedId: eliminatedId,
   });
 
-  // snapshot + faz geçişi
   broadcastSnapshot(roomId);
   startPhase(roomId, 'RESOLVE', 3);
 }
-
 
 function advancePhase(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
   const S = room.state;
-  const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 0 };
+  const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 };
 
   const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()));
   if (gameEnded && S.phase !== 'END') {
@@ -479,7 +549,7 @@ function advancePhase(roomId) {
       else startPhase(roomId, 'DAY_DISCUSSION', settings.dayDuration);
       break;
     case 'CARD_DRAWING':
-      startPhase(roomId, 'DAY_DISCUSSION', settings.dayDuration);
+      // Artık burada otomatik geçiş YOK; onay gelince CARD_CONFIRM içinde DAY_DISCUSSION'a geçiyoruz.
       break;
     case 'DAY_DISCUSSION':
       startPhase(roomId, 'VOTE', settings.voteDuration);
@@ -522,7 +592,7 @@ wss.on('connection', (ws) => {
           rooms.set(joinRoomId, {
             players: new Map(),
             sockets: new Set(),
-            settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 0 },
+            settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 }, // default 1
             state: {
               phase: 'LOBBY',
               currentTurn: 1,
@@ -534,6 +604,10 @@ wss.on('connection', (ws) => {
               playerNotes: {},
               game: null,
               phaseEndsAt: 0,
+              // cards
+              selectedCardDrawers: [],
+              currentCardDrawerIndex: 0,
+              currentCardDrawer: null,
             },
             timer: null,
             ownerId: null,
@@ -548,19 +622,15 @@ wss.on('connection', (ws) => {
         if (!room.ownerId && player.isOwner) {
           room.ownerId = player.id;
         }
-        // Socket set'ine ekle
         room.sockets.add(ws);
 
-        // Katılan istemciye onay
         ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
 
-        // Herkese güncel oyuncu listesi
         broadcast(room, 'PLAYER_LIST_UPDATED', {
           players: Array.from(room.players.values()),
           newPlayer: player,
         });
 
-        // Yeni katılana mevcut state snapshot
         const snap = snapshotRoom(joinRoomId);
         ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: joinRoomId, state: snap }, serverTime: now() }));
         break;
@@ -595,15 +665,12 @@ wss.on('connection', (ws) => {
         if (!room) return;
         if (room.state.phase !== 'LOBBY') break;
 
-        // 1) settings
         if (payload && payload.settings) {
           room.settings = { ...room.settings, ...payload.settings };
         }
 
-        // 2) players
         let startPlayers = Array.isArray(payload?.players) ? payload.players : Array.from(room.players.values());
 
-        // (kritik) roller yoksa server dağıtsın
         const hasRoles =
           startPlayers.length > 0 &&
           startPlayers.every((p) => typeof p.role === 'string' && p.role.length > 0);
@@ -615,10 +682,8 @@ wss.on('connection', (ws) => {
           console.log('[WS] Roles provided by client for', startPlayers.length, 'players');
         }
 
-        // authoritative write
         room.players = new Map(startPlayers.map((p) => [p.id, { ...p, isAlive: p.isAlive ?? true }]));
 
-        // 3) reset state
         room.state.game = { startedAt: new Date() };
         room.state.currentTurn = 1;
         room.state.nightActions = [];
@@ -627,11 +692,13 @@ wss.on('connection', (ws) => {
         room.state.deathLog = [];
         room.state.bombTargets = [];
         room.state.playerNotes = {};
+        // reset card state
+        room.state.selectedCardDrawers = [];
+        room.state.currentCardDrawerIndex = 0;
+        room.state.currentCardDrawer = null;
 
-        // 4) faz
         startPhase(rid, 'ROLE_REVEAL', 10);
 
-        // 5) inform
         broadcast(room, 'GAME_STARTED', { players: toPlain(startPlayers), settings: room.settings });
         break;
       }
@@ -670,24 +737,19 @@ wss.on('connection', (ws) => {
         const room = rooms.get(rid);
         if (!room) break;
 
-        // Oyu atan kişi — otorite server: ws.playerId
         const voterId = ws.playerId;
-        const targetId = payload?.targetId; // 'SKIP' olabilir veya bir oyuncu id'si
+        const targetId = payload?.targetId;
         if (!voterId || typeof targetId !== 'string') break;
 
-        // Sadece canlı oyuncu oy atabilir
         const voter = room.players.get(voterId);
         if (!voter || !voter.isAlive) break;
 
-        // Oyu kaydet
         room.state.votes[voterId] = targetId;
         console.log('[WS] vote:', voterId, '->', targetId);
 
-        // Tüm oyunculara güncel oy tablosu ve snapshot gönder
         broadcast(room, 'VOTES_UPDATED', { votes: toPlain(room.state.votes) });
         broadcastSnapshot(rid);
 
-        // Tüm canlılar oy verdi mi?
         const aliveIds = Array.from(room.players.values()).filter(p => p.isAlive).map(p => p.id);
         const votedAliveCount = aliveIds.filter(id => Object.prototype.hasOwnProperty.call(room.state.votes, id)).length;
 
@@ -697,58 +759,105 @@ wss.on('connection', (ws) => {
         }
         break;
       }
-        case "UPDATE_SETTINGS": {
-  if (!rid) return;
-  const room = rooms.get(rid);
-  if (!room) return;
 
-  // Sadece owner değiştirebilsin
-  if (ws.playerId !== room.ownerId) return;
+      case "UPDATE_SETTINGS": {
+        if (!rid) return;
+        const room = rooms.get(rid);
+        if (!room) return;
+        if (ws.playerId !== room.ownerId) return;
+        room.settings = { ...room.settings, ...payload.settings };
+        broadcast(room, "SETTINGS_UPDATED", { settings: room.settings });
+        broadcastSnapshot(rid);
+        break;
+      }
 
-  room.settings = { ...room.settings, ...payload.settings };
+      /* ---------- Card drawing flow ---------- */
+      case 'CARD_QR_SCANNED': {
+        const room = rooms.get(rid);
+        if (!room) break;
+        const S = room.state;
 
-  broadcast(room, "SETTINGS_UPDATED", { settings: room.settings });
-  broadcastSnapshot(rid); // anında snapshot da gönderilsin
-  break;
-}
+        if (S.phase !== 'CARD_DRAWING') break;
+        if (ws.playerId !== S.currentCardDrawer) break;
+
+        const token = payload?.token;
+        const options = QR_CARDS[token];
+        if (!options || options.length === 0) {
+          sendToPlayer(room, ws.playerId, "CARD_PREVIEW", { error: "Geçersiz veya tanımsız QR kodu." });
+          break;
+        }
+        const chosen = randPick(options); // {effectId, text}
+        sendToPlayer(room, ws.playerId, "CARD_PREVIEW", {
+          effectId: chosen.effectId,
+          text: chosen.text,
+          token,
+        });
+        break;
+      }
+
+      case 'CARD_CONFIRM': {
+        const room = rooms.get(rid);
+        if (!room) break;
+        const S = room.state;
+
+        if (S.phase !== 'CARD_DRAWING') break;
+        if (ws.playerId !== S.currentCardDrawer) break;
+
+        const effectId = payload?.effectId;
+        const result = applyCardEffect(room, effectId);
+
+        sendToPlayer(room, ws.playerId, "CARD_APPLIED_PRIVATE", { effectId, result });
+
+        // herkes güncel durumu görsün
+        broadcastSnapshot(rid);
+
+        // sırayı kapatıp gündüze geç
+        S.selectedCardDrawers = [];
+        S.currentCardDrawer = null;
+        S.currentCardDrawerIndex = 0;
+
+        startPhase(rid, 'DAY_DISCUSSION', room.settings.dayDuration || 120);
+        break;
+      }
+      /* -------------------------------------- */
+
       case "RESET_GAME": {
-  if (!rid) break;
-  const room = rooms.get(rid);
-  if (!room) break;
+        if (!rid) break;
+        const room = rooms.get(rid);
+        if (!room) break;
 
-  // tüm state'i sıfırla
-  room.state = {
-    phase: "LOBBY",
-    currentTurn: 1,
-    nightActions: [],
-    votes: {},
-    deathsThisTurn: [],
-    deathLog: [],
-    bombTargets: [],
-    playerNotes: {},
-    game: null,
-    phaseEndsAt: 0,
-  };
+        room.state = {
+          phase: "LOBBY",
+          currentTurn: 1,
+          nightActions: [],
+          votes: {},
+          deathsThisTurn: [],
+          deathLog: [],
+          bombTargets: [],
+          playerNotes: {},
+          game: null,
+          phaseEndsAt: 0,
+          selectedCardDrawers: [],
+          currentCardDrawerIndex: 0,
+          currentCardDrawer: null,
+        };
 
-  clearTimer(room);
+        clearTimer(room);
 
-  // tüm oyuncular tekrar hayatta olsun
-  room.players.forEach((p, id) => {
-    room.players.set(id, {
-      ...p,
-      role: undefined,
-      displayRole: undefined,
-      isAlive: true,
-      isMuted: false,
-      hasShield: false,
-    });
-  });
+        room.players.forEach((p, id) => {
+          room.players.set(id, {
+            ...p,
+            role: undefined,
+            displayRole: undefined,
+            isAlive: true,
+            isMuted: false,
+            hasShield: false,
+          });
+        });
 
-  // herkese bildir
-  broadcast(room, "RESET_GAME", { players: Array.from(room.players.values()) });
-  break;
-}
-
+        broadcast(room, "RESET_GAME", { players: Array.from(room.players.values()) });
+        break;
+      }
 
       default:
         break;
