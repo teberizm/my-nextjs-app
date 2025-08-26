@@ -699,7 +699,7 @@ wss.on('connection', (ws) => {
   const room = rooms.get(rid);
   if (!room) break;
 
-  // state’i sıfırla
+  // tüm state'i sıfırla
   room.state = {
     phase: "LOBBY",
     currentTurn: 1,
@@ -714,7 +714,21 @@ wss.on('connection', (ws) => {
   };
 
   clearTimer(room);
-  broadcast(room, "RESET_GAME", {});
+
+  // tüm oyuncular tekrar hayatta olsun
+  room.players.forEach((p, id) => {
+    room.players.set(id, {
+      ...p,
+      role: undefined,
+      displayRole: undefined,
+      isAlive: true,
+      isMuted: false,
+      hasShield: false,
+    });
+  });
+
+  // herkese bildir
+  broadcast(room, "RESET_GAME", { players: Array.from(room.players.values()) });
   break;
 }
 
