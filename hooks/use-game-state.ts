@@ -330,9 +330,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   );
 
   useEffect(() => {
-  const onReset = () => {
+  const onReset = (evt: any) => {
     setGame(null);
-    setPlayers([]);
+    setPlayers(evt?.payload?.players || []); // server'dan gelen temiz oyuncu listesi
     setCurrentPhase("LOBBY");
     setTimeRemaining(0);
     setPhaseEndsAt(0);
