@@ -180,7 +180,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         <RoomLobby
           room={currentRoom}
           currentPlayer={currentPlayer}
-          gameSettings={gameSettings}
+          gameSettings={game?.settings ?? gameSettings} 
           onStartGame={handleStartGame}
           onKickPlayer={handleKickPlayer}
           onToggleLock={handleToggleLock}
@@ -189,7 +189,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       ) : (
         <GameController
           initialPlayers={currentRoom.players}
-          gameSettings={gameSettings}
+          gameSettings={game?.settings ?? gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
         />
