@@ -22,7 +22,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     isLocked: false,
     createdAt: new Date(),
   });
-  
+
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [gamePhase, setGamePhase] = useState<GamePhase>("LOBBY");
 
@@ -70,14 +70,12 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     // Bağlanır bağlanmaz full snapshot iste
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
 
-    // Oyuncu listesi güncellendi
+    // --- Event handlers ---
     const onPlayerList = (data: any) => {
       const players = data?.payload?.players || [];
       setCurrentRoom((prev) => ({ ...prev, players }));
     };
-    wsClient.on("PLAYER_LIST_UPDATED", onPlayerList);
 
-    // Atılma
     const onKicked = (data: any) => {
       if (data?.payload?.playerId === currentPlayer.id) {
         setCurrentPlayer(null);
@@ -85,15 +83,17 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         setCurrentRoom((prev) => ({ ...prev, players: [] }));
       }
     };
-    wsClient.on("PLAYER_KICKED", onKicked);
 
-    // Oyun başladı — fazı server yayınlayacak
-    const onGameStarted = () => {
+    // Oyun başladı → sunucunun gönderdiği ayarları al
+    const onGameStarted = (data: any) => {
+      const settings = data?.payload?.settings as GameSettings | undefined;
+      if (settings) {
+        setGameSettings(settings);
+      }
+      // Faz geçişini server PHASE_CHANGED ile yapacak
       console.log("[client] GAME_STARTED received");
     };
-    wsClient.on("GAME_STARTED", onGameStarted);
 
-    // Faz değişimi (yalnızca server’dan)
     const onPhaseChanged = (data: any) => {
       const next = data?.payload?.phase as GamePhase | undefined;
       if (next) {
@@ -101,9 +101,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         setGamePhase(next);
       }
     };
-    wsClient.on("PHASE_CHANGED", onPhaseChanged);
 
-    // Tam fotoğraf (state snapshot)
+    // Sunucu snapshot (oyuncular + faz). (Not: settings snapshot içinde gelmiyor.)
     const onSnapshot = (data: any) => {
       const s = data?.payload?.state;
       if (!s) return;
@@ -116,14 +115,31 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         setGamePhase(s.phase as GamePhase);
       }
     };
-    wsClient.on("STATE_SNAPSHOT", onSnapshot);
 
+    // 🔥 Kritik: Ayarlar güncellendi → tüm istemcilerde UI'ı senkronla
+    const onSettingsUpdated = (data: any) => {
+      const settings = data?.payload?.settings as GameSettings | undefined;
+      if (settings) {
+        setGameSettings(settings);
+      }
+    };
+
+    // --- Subscribe ---
+    wsClient.on("PLAYER_LIST_UPDATED", onPlayerList);
+    wsClient.on("PLAYER_KICKED", onKicked);
+    wsClient.on("GAME_STARTED", onGameStarted);
+    wsClient.on("PHASE_CHANGED", onPhaseChanged);
+    wsClient.on("STATE_SNAPSHOT", onSnapshot);
+    wsClient.on("SETTINGS_UPDATED", onSettingsUpdated);
+
+    // --- Cleanup ---
     return () => {
       wsClient.off("PLAYER_LIST_UPDATED", onPlayerList);
       wsClient.off("PLAYER_KICKED", onKicked);
       wsClient.off("GAME_STARTED", onGameStarted);
       wsClient.off("PHASE_CHANGED", onPhaseChanged);
       wsClient.off("STATE_SNAPSHOT", onSnapshot);
+      wsClient.off("SETTINGS_UPDATED", onSettingsUpdated);
       wsClient.disconnect();
     };
   }, [currentPlayer, currentRoom.inviteCode]);
@@ -165,8 +181,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       })),
     }));
     if (currentPlayer?.isOwner) {
-    wsClient.sendEvent("RESET_GAME" as any, {});
-  }
+      wsClient.sendEvent("RESET_GAME" as any, {});
+    }
   };
 
   if (!currentPlayer) {
@@ -181,7 +197,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         <RoomLobby
           room={currentRoom}
           currentPlayer={currentPlayer}
-          gameSettings={game?.settings ?? gameSettings} 
+          gameSettings={game?.settings ?? gameSettings}
           onStartGame={handleStartGame}
           onKickPlayer={handleKickPlayer}
           onToggleLock={handleToggleLock}
