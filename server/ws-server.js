@@ -694,13 +694,14 @@ wss.on('connection', (ws) => {
         }
         break;
       }
-      case 'RESET_GAME': {
+      case "RESET_GAME": {
+  if (!rid) break;
   const room = rooms.get(rid);
   if (!room) break;
 
   // state’i sıfırla
   room.state = {
-    phase: 'LOBBY',
+    phase: "LOBBY",
     currentTurn: 1,
     nightActions: [],
     votes: {},
@@ -713,11 +714,10 @@ wss.on('connection', (ws) => {
   };
 
   clearTimer(room);
-
-  broadcast(room, 'RESET_GAME', { roomId: rid });
-  broadcastSnapshot(rid);
+  broadcast(room, "RESET_GAME", {});
   break;
 }
+
 
       default:
         break;
