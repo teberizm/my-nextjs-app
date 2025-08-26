@@ -55,8 +55,8 @@ function computeWsUrl(): string {
   if (typeof window !== "undefined") {
     const isSecure = window.location.protocol === "https:";
     const proto = isSecure ? "wss" : "ws";
-    const host = window.location.hostname; // port eklemeyelim, 3001'i sabit veriyoruz
-    return `${proto}://${host}:3001`;
+    const host = window.location.host; // dikkat: host = domain + port (eğer varsa)
+    return `${proto}://${host}/socket`;
   }
   return "ws://127.0.0.1:3001";
 }
