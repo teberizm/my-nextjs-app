@@ -49,7 +49,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [players, setPlayers] = useState<Player[]>([]);
   const [currentPhase, setCurrentPhase] = useState<GamePhase>("LOBBY");
   const [timeRemaining, setTimeRemaining] = useState(0);
-
+  const [voteCount, setVoteCount] = useState<Record<string, number>>({});
   // server-otoriteli zaman (epoch ms)
   const [phaseEndsAt, setPhaseEndsAt] = useState<number>(0);
 
@@ -151,6 +151,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     const onNotes = (evt: any) => {
       if (evt?.payload?.playerNotes) setPlayerNotes(evt.payload.playerNotes);
     };
+    const onVoteResult = (evt: any) => {
+  console.log("[client] VOTE_RESULT received", evt.payload);
+  if (evt?.payload?.voteCount) {
+    setVoteCount(evt.payload.voteCount as Record<string, number>);
+  } else {
+    setVoteCount({});
+  }
+};
 
     wsClient.on("GAME_STARTED", onGameStarted);
     wsClient.on("PHASE_CHANGED", onPhaseChanged);
@@ -158,6 +166,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     wsClient.on("NIGHT_ACTIONS_UPDATED", onNightActions);
     wsClient.on("VOTES_UPDATED", onVotes);
     wsClient.on("NOTES_UPDATED", onNotes);
+    wsClient.on("VOTE_RESULT", onVoteResult);
 
     // bağlanan istemci anında eşitlensin
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
@@ -169,6 +178,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       wsClient.off("NIGHT_ACTIONS_UPDATED", onNightActions);
       wsClient.off("VOTES_UPDATED", onVotes);
       wsClient.off("NOTES_UPDATED", onNotes);
+      wsClient.off("VOTE_RESULT", onVoteResult);
     };
   }, []);
 
@@ -330,6 +340,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     currentTurn,
     nightActions,
     votes,
+    voteCount, 
     isGameOwner,
     selectedCardDrawers,
     currentCardDrawer,
