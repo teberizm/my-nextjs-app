@@ -22,7 +22,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     isLocked: false,
     createdAt: new Date(),
   });
-
+  
   const [currentPlayer, setCurrentPlayer] = useState<Player | null>(null);
   const [gamePhase, setGamePhase] = useState<GamePhase>("LOBBY");
 
@@ -34,6 +34,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     dayDuration: 120,
     voteDuration: 45,
   });
+  const [game, setGame] = useState<Game | null>(null);
 
   // Odaya giriş (sadece kendi kimliğimizi oluşturuyoruz; oyuncu listesi sunucudan gelecek)
   const handleJoin = (name: string, isAdmin: boolean, password?: string): boolean => {
