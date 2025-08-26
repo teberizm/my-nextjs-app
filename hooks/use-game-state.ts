@@ -180,7 +180,13 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     const onNotes = (evt: any) => {
       if (evt?.payload?.playerNotes) setPlayerNotes(evt.payload.playerNotes);
     };
-
+    const onSettingsUpdated = (evt: any) => {
+  if (evt?.payload?.settings) {
+    setGame((prev) =>
+      prev ? { ...prev, settings: evt.payload.settings } : null
+    );
+  }
+};
     const onReset = () => {
       resetGame();
     };
@@ -191,6 +197,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     wsClient.on("VOTES_UPDATED", onVotes);
     wsClient.on("VOTE_RESULT", onVoteResult);
     wsClient.on("NOTES_UPDATED", onNotes);
+    wsClient.on("SETTINGS_UPDATED", onSettingsUpdated);
     wsClient.on("RESET_GAME", onReset);
 
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
@@ -202,6 +209,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       wsClient.off("VOTES_UPDATED", onVotes);
       wsClient.off("VOTE_RESULT", onVoteResult);
       wsClient.off("NOTES_UPDATED", onNotes);
+      wsClient.off("SETTINGS_UPDATED", onSettingsUpdated);
       wsClient.off("RESET_GAME", onReset);
     };
   }, [resetGame]);
