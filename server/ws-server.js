@@ -422,24 +422,34 @@ function processVotes(roomId) {
   });
 
   const top = Object.entries(voteCount).filter(([, c]) => c === maxVotes);
-  if (top.length > 1) eliminatedId = null; // eşitlik: kimse elenmez
+  if (top.length > 1) eliminatedId = null; // beraberlik → kimse elenmez
 
   const newPlayersMap = new Map(room.players);
   const newDeaths = [];
   if (eliminatedId && maxVotes > 0) {
     const target = newPlayersMap.get(eliminatedId);
-    if (target && target.isAlive) { target.isAlive = false; newDeaths.push({ ...target }); }
+    if (target && target.isAlive) {
+      target.isAlive = false;
+      newDeaths.push({ ...target });
+    }
   }
+
   room.players = newPlayersMap;
   S.deathsThisTurn = newDeaths;
   if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
 
-  // VOTE bitti: oyları temizle (bir sonraki fazda görünmesin)
-  S.votes = {};
+  // 🔥 Yeni ekleme: sonuçları client’a gönder
+  broadcast(room, "VOTE_RESULT", {
+    votes: S.votes,          // kim kime oy verdi
+    voteCount: voteCount,    // aday başına oy sayısı
+    eliminatedId: eliminatedId,
+  });
 
+  // snapshot + faz geçişi
   broadcastSnapshot(roomId);
   startPhase(roomId, 'RESOLVE', 3);
 }
+
 
 function advancePhase(roomId) {
   const room = rooms.get(roomId);
