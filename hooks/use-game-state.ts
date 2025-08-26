@@ -78,50 +78,61 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     };
 
     const onPhaseChanged = (evt: any) => {
-  console.log('[client] PHASE_CHANGED', evt?.payload);
-  const { phase, phaseEndsAt, turn, selectedCardDrawers, currentCardDrawer } = evt?.payload || {};
-  if (phase) setCurrentPhase(phase);
-  if (typeof phaseEndsAt === "number") setPhaseEndsAt(phaseEndsAt);
-  if (typeof turn === "number") setCurrentTurn(turn);
-  if (Array.isArray(selectedCardDrawers)) setSelectedCardDrawers(selectedCardDrawers);
-  if (typeof currentCardDrawer === "string" || currentCardDrawer === null)
-    setCurrentCardDrawer(currentCardDrawer ?? null);
-};
+      console.log('[client] PHASE_CHANGED', evt?.payload);
+      const { phase, phaseEndsAt, turn, selectedCardDrawers, currentCardDrawer } = evt?.payload || {};
+      if (phase) setCurrentPhase(phase);
+      if (typeof phaseEndsAt === "number") setPhaseEndsAt(phaseEndsAt);
+      if (typeof turn === "number") setCurrentTurn(turn);
+      if (Array.isArray(selectedCardDrawers)) setSelectedCardDrawers(selectedCardDrawers);
+      if (typeof currentCardDrawer === "string" || currentCardDrawer === null)
+        setCurrentCardDrawer(currentCardDrawer ?? null);
+
+      // 🔁 Faz VOTE dışına çıkınca lokal vote görünümünü temizle
+      if (phase && phase !== "VOTE") {
+        setVotes({});
+      }
+    };
 
     const onSnapshot = (evt: any) => {
-  // bazı server’lar {payload: {...state}} gönderiyor, bazıları {payload:{state:{...}}}
-  const raw = evt?.payload;
-  const s = raw?.state ?? raw;
+      // bazı server’lar {payload: {...state}} gönderiyor, bazıları {payload:{state:{...}}}
+      const raw = evt?.payload;
+      const s = raw?.state ?? raw;
 
-  console.log('[client] STATE_SNAPSHOT received', s);
-  if (!s) return;
+      console.log('[client] STATE_SNAPSHOT received', s);
+      if (!s) return;
 
-  // tarihleri geri Date yapalım
-  const reviveDate = (v: any) => (typeof v === 'string' ? new Date(v) : v);
+      // tarihleri geri Date yapalım
+      const reviveDate = (v: any) => (typeof v === 'string' ? new Date(v) : v);
 
-  if (s.game) {
-    setGame({
-      ...s.game,
-      startedAt: reviveDate(s.game.startedAt),
-      endedAt: reviveDate(s.game.endedAt),
-    } as Game);
-  }
+      if (s.game) {
+        setGame({
+          ...s.game,
+          startedAt: reviveDate(s.game.startedAt),
+          endedAt: reviveDate(s.game.endedAt),
+        } as Game);
+      }
 
-  if (Array.isArray(s.players)) setPlayers(s.players);
-  if (s.phase) setCurrentPhase(s.phase as GamePhase);
-  if (typeof s.phaseEndsAt === 'number') setPhaseEndsAt(s.phaseEndsAt);
-  if (typeof s.currentTurn === 'number') setCurrentTurn(s.currentTurn);
-  if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
-  if (s.votes && typeof s.votes === "object") {
-  setVotes((prev) => ({ ...prev, ...s.votes }));  // 🔥 eskileri silmeden güncelle
-}
-  if (Array.isArray(s.deathsThisTurn)) setDeathsThisTurn(s.deathsThisTurn);
-  if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
-  if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
-  if (s.playerNotes) setPlayerNotes(s.playerNotes);
-  if (Array.isArray(s.selectedCardDrawers)) setSelectedCardDrawers(s.selectedCardDrawers);
-  if ('currentCardDrawer' in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
-};
+      if (Array.isArray(s.players)) setPlayers(s.players);
+      if (s.phase) setCurrentPhase(s.phase as GamePhase);
+      if (typeof s.phaseEndsAt === 'number') setPhaseEndsAt(s.phaseEndsAt);
+      if (typeof s.currentTurn === 'number') setCurrentTurn(s.currentTurn);
+      if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
+
+      // 🧠 ÖNEMLİ: merge değil, TAM REPLACE yap
+      if (s.votes && typeof s.votes === "object") {
+        setVotes(s.votes as Record<string, string>);
+      } else {
+        // snapshot'ta votes yoksa (örn. faz temizliği), sıfırla
+        setVotes({});
+      }
+
+      if (Array.isArray(s.deathsThisTurn)) setDeathsThisTurn(s.deathsThisTurn);
+      if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
+      if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
+      if (s.playerNotes) setPlayerNotes(s.playerNotes);
+      if (Array.isArray(s.selectedCardDrawers)) setSelectedCardDrawers(s.selectedCardDrawers);
+      if ('currentCardDrawer' in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
+    };
 
     const onNightActions = (evt: any) => {
       if (Array.isArray(evt?.payload?.actions)) {
@@ -130,10 +141,12 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     };
 
     const onVotes = (evt: any) => {
-  if (evt?.payload?.votes && typeof evt.payload.votes === "object") {
-    setVotes((prev) => ({ ...prev, ...evt.payload.votes })); // 🔥 merge
-  }
-};
+      // 🧠 ÖNEMLİ: merge değil, TAM REPLACE yap
+      const serverVotes = evt?.payload?.votes && typeof evt.payload.votes === "object"
+        ? (evt.payload.votes as Record<string, string>)
+        : {};
+      setVotes(serverVotes);
+    };
 
     const onNotes = (evt: any) => {
       if (evt?.payload?.playerNotes) setPlayerNotes(evt.payload.playerNotes);
@@ -172,7 +185,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-    console.log('[timer] phaseEndsAt ->', new Date(phaseEndsAt).toISOString());
+    // (not: return'den sonrası çalışmaz)
+    // console.log('[timer] phaseEndsAt ->', new Date(phaseEndsAt).toISOString());
   }, [phaseEndsAt]);
 
   // ---- owner: oyunu başlat (server’a authoritative event gönder)
@@ -202,37 +216,33 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       setCurrentPhase("ROLE_REVEAL");
       console.log('[owner] startGame -> broadcasting initial STATE_SNAPSHOT + PHASE_CHANGED');
 
-// authoritative snapshot (herkes aynı şeyi görsün)
-  const phase = 'ROLE_REVEAL';
-  const phaseEndsAt = Date.now() + 15_000;
+      // authoritative snapshot (herkes aynı şeyi görsün)
+      const phase = 'ROLE_REVEAL';
+      const phaseEndsAt = Date.now() + 15_000;
 
-  const snapshot = {
-  game: {
-    ...newGame,
-    // tarihleri düz string olsun: diğer client’lar Date’e çevirir
-    startedAt: newGame.startedAt.toISOString(),
-  },
-  players: playersWithRoles,
-  phase,
-  phaseEndsAt,
-  currentTurn: 1,
-  nightActions: [],
-  votes: {},
-  deathsThisTurn: [],
-  deathLog: [],
-  bombTargets: [],
-  playerNotes: {},
-  selectedCardDrawers: [],
-  currentCardDrawer: null,
-};
+      const snapshot = {
+        game: {
+          ...newGame,
+          startedAt: newGame.startedAt.toISOString(),
+        },
+        players: playersWithRoles,
+        phase,
+        phaseEndsAt,
+        currentTurn: 1,
+        nightActions: [],
+        votes: {},
+        deathsThisTurn: [],
+        deathLog: [],
+        bombTargets: [],
+        playerNotes: {},
+        selectedCardDrawers: [],
+        currentCardDrawer: null,
+      };
 
-// bazı kurulumlarda server payload’ı “direkt state” bekliyor;
-// biz payload.state ile gönderiyoruz (daha derli toplu).
       wsClient.sendEvent('STATE_SNAPSHOT' as any, { state: snapshot });
       wsClient.sendEvent('PHASE_CHANGED' as any, { phase, phaseEndsAt, turn: 1 });
 
       console.log('[owner] sent STATE_SNAPSHOT & PHASE_CHANGED', snapshot);
-      // authoritative broadcast -> server tüm odaya yayacak
       wsClient.sendEvent("GAME_STARTED" as any, {
         settings,
         players: playersWithRoles,
@@ -243,7 +253,6 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
   // ---- fazı client'tan atlatma: server otoriteli olduğu için boş
   const advancePhase = useCallback(() => {
-    // Eğer server tarafında "REQUEST_ADVANCE" vb. endpoint eklediysen burada çağır.
     // wsClient.sendEvent("REQUEST_ADVANCE" as any, {});
   }, []);
 
@@ -287,11 +296,11 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       const voter = players.find((p) => p.id === voterId);
       if (!voter?.isAlive) return;
 
-      // local optimistic
-      setVotes((prev) => ({ ...prev, [voterId]: targetId }));
+      // 🚫 Lokal optimistic KALDIRILDI — otorite sunucu
+      // setVotes((prev) => ({ ...prev, [voterId]: targetId }));
 
-      // authoritative -> server
-      wsClient.sendEvent("SUBMIT_VOTE" as any, { voterId, targetId });
+      // authoritative -> server (server zaten ws.playerId'yi kullanıyor)
+      wsClient.sendEvent("SUBMIT_VOTE" as any, { targetId });
     },
     [players],
   );
