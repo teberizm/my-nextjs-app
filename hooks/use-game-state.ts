@@ -20,6 +20,7 @@ interface GameStateHook {
   currentTurn: number;
   nightActions: NightAction[];
   votes: Record<string, string>;
+  voteCount: Record<string, number>;
   isGameOwner: boolean;
   selectedCardDrawers: string[];
   currentCardDrawer: string | null;
@@ -28,7 +29,7 @@ interface GameStateHook {
   bombTargets: string[];
   playerNotes: Record<string, string[]>;
   startGame: (players: Player[], settings: GameSettings) => void;
-  advancePhase: () => void; // server otoriteli, client tarafında boş
+  advancePhase: () => void;
   submitNightAction: (
     playerId: string,
     targetId: string | null,
@@ -50,10 +51,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [currentPhase, setCurrentPhase] = useState<GamePhase>("LOBBY");
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [voteCount, setVoteCount] = useState<Record<string, number>>({});
-  // server-otoriteli zaman (epoch ms)
   const [phaseEndsAt, setPhaseEndsAt] = useState<number>(0);
 
-  // oyun içi state’ler
   const [currentTurn, setCurrentTurn] = useState(1);
   const [nightActions, setNightActions] = useState<NightAction[]>([]);
   const [votes, setVotes] = useState<Record<string, string>>({});
@@ -67,35 +66,53 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const currentPlayer = players.find((p) => p.id === currentPlayerId);
   const isGameOwner = currentPlayer?.isOwner || false;
 
-  // ---- WS dinleyicileri (tek otorite: sunucu)
+  // ---- resetGame helper
+  const resetGame = useCallback(() => {
+    setGame(null);
+    setPlayers([]);
+    setCurrentPhase("LOBBY");
+    setTimeRemaining(0);
+    setPhaseEndsAt(0);
+    setCurrentTurn(1);
+    setNightActions([]);
+    setVotes({});
+    setVoteCount({});
+    setSelectedCardDrawers([]);
+    setCurrentCardDrawer(null);
+    setDeathsThisTurn([]);
+    setDeathLog([]);
+    setBombTargets([]);
+    setPlayerNotes({});
+  }, []);
+
+  // ---- WS dinleyicileri
   useEffect(() => {
     const onGameStarted = (evt: any) => {
-  const payload = evt?.payload || {};
+      const payload = evt?.payload || {};
 
-  // Ayarlar herkeste güncellensin
-  if (payload.settings) {
-    setGame((prev) =>
-      prev
-        ? { ...prev, settings: payload.settings }
-        : {
-            id: Math.random().toString(36).slice(2),
-            roomId: payload.roomId ?? "",
-            phase: "ROLE_REVEAL",
-            currentTurn: 1,
-            settings: payload.settings,
-            seed: Math.random().toString(36).slice(2),
-            startedAt: new Date(),
-          },
-    );
-  }
+      // Ayarlar herkeste güncellensin
+      if (payload.settings) {
+        setGame((prev) =>
+          prev
+            ? { ...prev, settings: payload.settings }
+            : {
+                id: Math.random().toString(36).slice(2),
+                roomId: payload.roomId ?? "",
+                phase: "ROLE_REVEAL",
+                currentTurn: 1,
+                settings: payload.settings,
+                seed: Math.random().toString(36).slice(2),
+                startedAt: new Date(),
+              },
+        );
+      }
 
-  if (Array.isArray(payload.players)) {
-    setPlayers(payload.players);
-  }
-};
+      if (Array.isArray(payload.players)) {
+        setPlayers(payload.players);
+      }
+    };
 
     const onPhaseChanged = (evt: any) => {
-      console.log('[client] PHASE_CHANGED', evt?.payload);
       const { phase, phaseEndsAt, turn, selectedCardDrawers, currentCardDrawer } = evt?.payload || {};
       if (phase) setCurrentPhase(phase);
       if (typeof phaseEndsAt === "number") setPhaseEndsAt(phaseEndsAt);
@@ -104,21 +121,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       if (typeof currentCardDrawer === "string" || currentCardDrawer === null)
         setCurrentCardDrawer(currentCardDrawer ?? null);
 
-      // 🔁 Faz VOTE dışına çıkınca lokal vote görünümünü temizle
       if (phase && phase !== "VOTE") {
         setVotes({});
+        setVoteCount({});
       }
     };
 
     const onSnapshot = (evt: any) => {
-      // bazı server’lar {payload: {...state}} gönderiyor, bazıları {payload:{state:{...}}}
       const raw = evt?.payload;
       const s = raw?.state ?? raw;
-
-      console.log('[client] STATE_SNAPSHOT received', s);
       if (!s) return;
 
-      // tarihleri geri Date yapalım
       const reviveDate = (v: any) => (typeof v === 'string' ? new Date(v) : v);
 
       if (s.game) {
@@ -135,11 +148,9 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       if (typeof s.currentTurn === 'number') setCurrentTurn(s.currentTurn);
       if (Array.isArray(s.nightActions)) setNightActions(s.nightActions);
 
-      // 🧠 ÖNEMLİ: merge değil, TAM REPLACE yap
       if (s.votes && typeof s.votes === "object") {
         setVotes(s.votes as Record<string, string>);
       } else {
-        // snapshot'ta votes yoksa (örn. faz temizliği), sıfırla
         setVotes({});
       }
 
@@ -151,55 +162,51 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       if ('currentCardDrawer' in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
     };
 
-    const onNightActions = (evt: any) => {
-      if (Array.isArray(evt?.payload?.actions)) {
-        setNightActions(evt.payload.actions);
-      }
-    };
-
     const onVotes = (evt: any) => {
-      // 🧠 ÖNEMLİ: merge değil, TAM REPLACE yap
       const serverVotes = evt?.payload?.votes && typeof evt.payload.votes === "object"
         ? (evt.payload.votes as Record<string, string>)
         : {};
       setVotes(serverVotes);
     };
 
+    const onVoteResult = (evt: any) => {
+      if (evt?.payload?.voteCount) {
+        setVoteCount(evt.payload.voteCount as Record<string, number>);
+      } else {
+        setVoteCount({});
+      }
+    };
+
     const onNotes = (evt: any) => {
       if (evt?.payload?.playerNotes) setPlayerNotes(evt.payload.playerNotes);
     };
-    const onVoteResult = (evt: any) => {
-  console.log("[client] VOTE_RESULT received", evt.payload);
-  if (evt?.payload?.voteCount) {
-    setVoteCount(evt.payload.voteCount as Record<string, number>);
-  } else {
-    setVoteCount({});
-  }
-};
+
+    const onReset = () => {
+      resetGame();
+    };
 
     wsClient.on("GAME_STARTED", onGameStarted);
     wsClient.on("PHASE_CHANGED", onPhaseChanged);
     wsClient.on("STATE_SNAPSHOT", onSnapshot);
-    wsClient.on("NIGHT_ACTIONS_UPDATED", onNightActions);
     wsClient.on("VOTES_UPDATED", onVotes);
-    wsClient.on("NOTES_UPDATED", onNotes);
     wsClient.on("VOTE_RESULT", onVoteResult);
+    wsClient.on("NOTES_UPDATED", onNotes);
+    wsClient.on("RESET_GAME", onReset);
 
-    // bağlanan istemci anında eşitlensin
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
 
     return () => {
       wsClient.off("GAME_STARTED", onGameStarted);
       wsClient.off("PHASE_CHANGED", onPhaseChanged);
       wsClient.off("STATE_SNAPSHOT", onSnapshot);
-      wsClient.off("NIGHT_ACTIONS_UPDATED", onNightActions);
       wsClient.off("VOTES_UPDATED", onVotes);
-      wsClient.off("NOTES_UPDATED", onNotes);
       wsClient.off("VOTE_RESULT", onVoteResult);
+      wsClient.off("NOTES_UPDATED", onNotes);
+      wsClient.off("RESET_GAME", onReset);
     };
-  }, []);
+  }, [resetGame]);
 
-  // ---- timeRemaining sadece server phaseEndsAt'ten hesaplanır
+  // ---- timer
   useEffect(() => {
     if (!phaseEndsAt) {
       setTimeRemaining(0);
@@ -212,23 +219,17 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-    // (not: return'den sonrası çalışmaz)
-    // console.log('[timer] phaseEndsAt ->', new Date(phaseEndsAt).toISOString());
   }, [phaseEndsAt]);
 
-  // ---- owner: oyunu başlat (server’a authoritative event gönder)
+  // ---- owner: startGame
   const startGame = useCallback(
     (gamePlayers: Player[], settings: GameSettings) => {
       if (!gamePlayers || gamePlayers.length === 0) return;
-
-      const amOwner = !!gamePlayers.find(
-        (p) => p.id === currentPlayerId && p.isOwner,
-      );
-      if (!amOwner) return; // owner olmayan başlatmaz, server'dan bekler
+      const amOwner = !!gamePlayers.find((p) => p.id === currentPlayerId && p.isOwner);
+      if (!amOwner) return;
 
       const playersWithRoles = assignRoles(gamePlayers, settings);
 
-      // local preview (UI boş kalmasın)
       const newGame: Game = {
         id: Math.random().toString(36).slice(2),
         roomId: Math.random().toString(36).slice(2),
@@ -241,17 +242,12 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       setGame(newGame);
       setPlayers(playersWithRoles);
       setCurrentPhase("ROLE_REVEAL");
-      console.log('[owner] startGame -> broadcasting initial STATE_SNAPSHOT + PHASE_CHANGED');
 
-      // authoritative snapshot (herkes aynı şeyi görsün)
       const phase = 'ROLE_REVEAL';
       const phaseEndsAt = Date.now() + 15_000;
 
       const snapshot = {
-        game: {
-          ...newGame,
-          startedAt: newGame.startedAt.toISOString(),
-        },
+        game: { ...newGame, startedAt: newGame.startedAt.toISOString() },
         players: playersWithRoles,
         phase,
         phaseEndsAt,
@@ -268,91 +264,33 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
       wsClient.sendEvent('STATE_SNAPSHOT' as any, { state: snapshot });
       wsClient.sendEvent('PHASE_CHANGED' as any, { phase, phaseEndsAt, turn: 1 });
-
-      console.log('[owner] sent STATE_SNAPSHOT & PHASE_CHANGED', snapshot);
-      wsClient.sendEvent("GAME_STARTED" as any, {
-        settings,
-        players: playersWithRoles,
-      });
+      wsClient.sendEvent("GAME_STARTED" as any, { settings, players: playersWithRoles });
     },
     [currentPlayerId],
   );
 
-  // ---- fazı client'tan atlatma: server otoriteli olduğu için boş
-  const advancePhase = useCallback(() => {
-    // wsClient.sendEvent("REQUEST_ADVANCE" as any, {});
-  }, []);
+  const advancePhase = useCallback(() => {}, []);
 
-  // ---- herkesin night action'ı server'a gider
   const submitNightAction = useCallback(
-    (
-      playerId: string,
-      targetId: string | null,
-      actionType:
-        | "KILL"
-        | "PROTECT"
-        | "INVESTIGATE"
-        | "BOMB_PLANT"
-        | "BOMB_DETONATE",
-    ) => {
+    (playerId: string, targetId: string | null, actionType: any) => {
       const actor = players.find((p) => p.id === playerId);
       if (!actor || !actor.isAlive) return;
-
-      const action: NightAction = {
-        playerId,
-        targetId,
-        actionType,
-        timestamp: new Date(),
-      };
-
-      // local optimistic (UI’da "gönderildi" göstermek için)
-      setNightActions((prev) => [
-        ...prev.filter((a) => a.playerId !== playerId),
-        action,
-      ]);
-
-      // authoritative -> server
+      const action: NightAction = { playerId, targetId, actionType, timestamp: new Date() };
+      setNightActions((prev) => [...prev.filter((a) => a.playerId !== playerId), action]);
       wsClient.sendEvent("NIGHT_ACTION_SUBMITTED" as any, { action });
     },
     [players],
   );
 
-  // ---- oy kullanımı da server'a gider
   const submitVote = useCallback(
     (voterId: string, targetId: string) => {
       const voter = players.find((p) => p.id === voterId);
       if (!voter?.isAlive) return;
-
-      // 🚫 Lokal optimistic KALDIRILDI — otorite sunucu
-      // setVotes((prev) => ({ ...prev, [voterId]: targetId }));
-
-      // authoritative -> server (server zaten ws.playerId'yi kullanıyor)
       wsClient.sendEvent("SUBMIT_VOTE" as any, { targetId });
     },
     [players],
   );
 
-  useEffect(() => {
-  const onReset = (evt: any) => {
-    setGame(null);
-    setPlayers(evt?.payload?.players || []); // server'dan gelen temiz oyuncu listesi
-    setCurrentPhase("LOBBY");
-    setTimeRemaining(0);
-    setPhaseEndsAt(0);
-    setCurrentTurn(1);
-    setNightActions([]);
-    setVotes({});
-    setSelectedCardDrawers([]);
-    setCurrentCardDrawer(null);
-    setDeathsThisTurn([]);
-    setDeathLog([]);
-    setBombTargets([]);
-    setPlayerNotes({});
-  };
-
-  wsClient.on("RESET_GAME", onReset);
-  return () => wsClient.off("RESET_GAME", onReset);
-}, []);
   return {
     game,
     players,
@@ -361,7 +299,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     currentTurn,
     nightActions,
     votes,
-    voteCount, 
+    voteCount,
     isGameOwner,
     selectedCardDrawers,
     currentCardDrawer,
