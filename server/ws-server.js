@@ -536,6 +536,7 @@ wss.on('connection', (ws) => {
               phaseEndsAt: 0,
             },
             timer: null,
+            ownerId: null,
           });
         }
 
@@ -544,7 +545,9 @@ wss.on('connection', (ws) => {
         // Oyuncuyu odaya ekle/güncelle
         const existing = room.players.get(player.id) || {};
         room.players.set(player.id, { ...existing, ...player, isAlive: existing.isAlive ?? true });
-
+        if (!room.ownerId && player.isOwner) {
+          room.ownerId = player.id;
+        }
         // Socket set'ine ekle
         room.sockets.add(ws);
 
