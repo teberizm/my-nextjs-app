@@ -180,13 +180,14 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     const onNotes = (evt: any) => {
       if (evt?.payload?.playerNotes) setPlayerNotes(evt.payload.playerNotes);
     };
-   const onUpdateSettings = (evt: any) => {
-  if (evt?.payload?.settings) {
-    setGame((prev) =>
-      prev ? { ...prev, settings: evt.payload.settings } : null
-    );
-  }
-};
+
+    // ✅ Ayar güncellemesi handler'ı (ISIM DÜZELTİLDİ)
+    const onSettingsUpdated = (evt: any) => {
+      if (evt?.payload?.settings) {
+        setGame((prev) => (prev ? { ...prev, settings: evt.payload.settings } : prev));
+      }
+    };
+
     const onReset = () => {
       resetGame();
     };
@@ -197,7 +198,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     wsClient.on("VOTES_UPDATED", onVotes);
     wsClient.on("VOTE_RESULT", onVoteResult);
     wsClient.on("NOTES_UPDATED", onNotes);
-    wsClient.on("UPDATE_SETTINGS", onUpdateSettings);
+    wsClient.on("SETTINGS_UPDATED", onSettingsUpdated); // <-- doğru kanal
     wsClient.on("RESET_GAME", onReset);
 
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
@@ -209,7 +210,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       wsClient.off("VOTES_UPDATED", onVotes);
       wsClient.off("VOTE_RESULT", onVoteResult);
       wsClient.off("NOTES_UPDATED", onNotes);
-      wsClient.off("UPDATE_SETTINGS", onSettingsUpdated);
+      wsClient.off("SETTINGS_UPDATED", onSettingsUpdated); // <-- cleanup'ta da aynı handler
       wsClient.off("RESET_GAME", onReset);
     };
   }, [resetGame]);
