@@ -705,6 +705,7 @@ wss.on('connection', (ws) => {
   room.settings = { ...room.settings, ...payload.settings };
 
   broadcast(room, "SETTINGS_UPDATED", { settings: room.settings });
+  broadcastSnapshot(rid); // anında snapshot da gönderilsin
   break;
 }
       case "RESET_GAME": {
