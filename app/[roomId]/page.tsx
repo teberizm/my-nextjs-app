@@ -163,6 +163,9 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         hasShield: false,
       })),
     }));
+    if (currentPlayer?.isOwner) {
+    wsClient.sendEvent("RESET_GAME" as any, {});
+  }
   };
 
   if (!currentPlayer) {
