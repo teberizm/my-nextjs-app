@@ -1,24 +1,24 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo } from "react"
-import { useGameState } from "@/hooks/use-game-state"
-import { RoleReveal } from "./role-reveal"
-import { NightActions } from "./night-actions"
-import { DayPhase } from "./day-phase"
-import { VotingPhase } from "./voting-phase"
-import { GameEnd } from "./game-end"
-import { NightResults } from "./night-results"
-import { DeathAnnouncement } from "./death-announcement"
-import { VoteResults } from "./vote-results"
-import { CardDrawingPhase } from "./card-drawing-phase"
-import type { Player, GameSettings } from "@/lib/types"
-import { wsClient } from "@/lib/websocket-client"
+import { useEffect, useMemo } from "react";
+import { useGameState } from "@/hooks/use-game-state";
+import { RoleReveal } from "./role-reveal";
+import { NightActions } from "./night-actions";
+import { DayPhase } from "./day-phase";
+import { VotingPhase } from "./voting-phase";
+import { GameEnd } from "./game-end";
+import { NightResults } from "./night-results";
+import { DeathAnnouncement } from "./death-announcement";
+import { VoteResults } from "./vote-results";
+import { CardDrawingPhase } from "./card-drawing-phase";
+import type { Player, GameSettings } from "@/lib/types";
+import { wsClient } from "@/lib/websocket-client";
 
 interface GameControllerProps {
-  initialPlayers: Player[]
-  gameSettings: GameSettings
-  currentPlayerId: string
-  onGameEnd: () => void
+  initialPlayers: Player[];
+  gameSettings: GameSettings;
+  currentPlayerId: string;
+  onGameEnd: () => void;
 }
 
 export function GameController({
@@ -36,7 +36,7 @@ export function GameController({
     votes,
     advancePhase,
     submitNightAction,
-    submitVote,
+    // submitVote, // ❌ artık doğrudan wsClient kullanıyoruz
     resetGame,
     nightActions,
     selectedCardDrawers,
@@ -45,33 +45,32 @@ export function GameController({
     deathLog,
     bombTargets,
     playerNotes,
-  } = useGameState(currentPlayerId)
+  } = useGameState(currentPlayerId);
 
   // Owner bilgisini initialPlayers'tan (WS snapshot) belirle – oyun başlamadan önce de doğru olur
   const isOwnerFromInitial = useMemo(() => {
-    return initialPlayers.find((p) => p.id === currentPlayerId)?.isOwner === true
-  }, [initialPlayers, currentPlayerId])
+    return initialPlayers.find((p) => p.id === currentPlayerId)?.isOwner === true;
+  }, [initialPlayers, currentPlayerId]);
 
   /**
    * Emniyet ağı:
    * - Oyun başlamadıysa,
    * - owner bizsek ve odada en az 4 kişi varsa
    * bir defa GAME_STARTED yayınla.
-   * (useGameState GAME_STARTED'i dinleyip startGame yapar; ikinci kez başlatmaz.)
    */
   useEffect(() => {
     if (!game && isOwnerFromInitial && initialPlayers.length >= 4) {
       const t = setTimeout(() => {
-        wsClient.sendEvent("GAME_STARTED", {
+        wsClient.sendEvent("GAME_STARTED" as any, {
           players: initialPlayers,
           settings: gameSettings,
-        })
-      }, 150)
-      return () => clearTimeout(t)
+        });
+      }, 150);
+      return () => clearTimeout(t);
     }
-  }, [game, isOwnerFromInitial, initialPlayers, gameSettings])
+  }, [game, isOwnerFromInitial, initialPlayers, gameSettings]);
 
-  const currentPlayer = players.find((p) => p.id === currentPlayerId)
+  const currentPlayer = players.find((p) => p.id === currentPlayerId);
 
   if (!currentPlayer || !game) {
     return (
@@ -81,25 +80,27 @@ export function GameController({
           <p className="text-muted-foreground">Oyun başlatılıyor...</p>
         </div>
       </div>
-    )
+    );
   }
 
   const handleNightAction = (
     targetId: string | null,
     actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
   ) => {
-    submitNightAction(currentPlayer.id, targetId, actionType)
-  }
+    submitNightAction(currentPlayer.id, targetId, actionType);
+  };
 
+  // 🔴 Kritik: Oy artık doğrudan wsClient ile sunucuya gider
   const handleVote = (targetId: string) => {
-    submitVote(currentPlayer.id, targetId)
-  }
+    console.log("[UI] SUBMIT_VOTE click ->", targetId);
+    wsClient.sendEvent("SUBMIT_VOTE" as any, { targetId });
+  };
 
-  const hasVoted = currentPlayer.id in votes
+  const hasVoted = currentPlayer.id in votes;
 
   switch (currentPhase) {
     case "ROLE_REVEAL":
-      return <RoleReveal player={currentPlayer} onContinue={advancePhase} />
+      return <RoleReveal player={currentPlayer} onContinue={advancePhase} />;
 
     case "NIGHT":
       return (
@@ -112,7 +113,7 @@ export function GameController({
           timeRemaining={timeRemaining}
           playerNotes={playerNotes}
         />
-      )
+      );
 
     case "NIGHT_RESULTS":
       return (
@@ -123,10 +124,10 @@ export function GameController({
           timeRemaining={timeRemaining}
           onContinue={advancePhase}
         />
-      )
+      );
 
     case "DEATH_ANNOUNCEMENT":
-      return <DeathAnnouncement deaths={deathsThisTurn} timeRemaining={timeRemaining} />
+      return <DeathAnnouncement deaths={deathsThisTurn} timeRemaining={timeRemaining} />;
 
     case "CARD_DRAWING":
       return (
@@ -137,7 +138,7 @@ export function GameController({
           currentPlayerId={currentPlayerId}
           onCardDrawn={advancePhase}
         />
-      )
+      );
 
     case "DAY_DISCUSSION":
       return (
@@ -149,7 +150,7 @@ export function GameController({
           playerNotes={playerNotes}
           deaths={deathLog}
         />
-      )
+      );
 
     case "VOTE":
       return (
@@ -163,7 +164,7 @@ export function GameController({
           playerNotes={playerNotes}
           deaths={deathLog}
         />
-      )
+      );
 
     case "RESOLVE":
       return (
@@ -174,7 +175,7 @@ export function GameController({
           deathLog={deathLog}
           timeRemaining={timeRemaining}
         />
-      )
+      );
 
     case "END":
       return (
@@ -183,14 +184,14 @@ export function GameController({
           players={players}
           currentPlayer={currentPlayer}
           onPlayAgain={() => {
-            resetGame()
-            onGameEnd()
+            resetGame();
+            onGameEnd();
           }}
           onBackToLobby={onGameEnd}
         />
-      )
+      );
 
     default:
-      return null
+      return null;
   }
 }
