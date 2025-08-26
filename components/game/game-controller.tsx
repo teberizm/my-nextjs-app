@@ -77,7 +77,6 @@ export function GameController({
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-muted-foreground">Oyun başlatılıyor...</p>
         </div>
       </div>
     );
@@ -94,6 +93,11 @@ export function GameController({
   const handleVote = (targetId: string) => {
     console.log("[UI] SUBMIT_VOTE click ->", targetId);
     wsClient.sendEvent("SUBMIT_VOTE" as any, { targetId });
+  };
+
+  // ✅ Yeni: QR okut (test) butonu — sabit token gönderir
+  const handleMockScan = () => {
+    wsClient.sendEvent("CARD_QR_SCANNED" as any, { token: "94138491230" });
   };
 
   const hasVoted = currentPlayer.id in votes;
@@ -131,13 +135,28 @@ export function GameController({
 
     case "CARD_DRAWING":
       return (
-        <CardDrawingPhase
-          players={players}
-          selectedCardDrawers={selectedCardDrawers}
-          currentCardDrawer={currentCardDrawer}
-          currentPlayerId={currentPlayerId}
-          onCardDrawn={advancePhase}
-        />
+        <>
+          <CardDrawingPhase
+            players={players}
+            selectedCardDrawers={selectedCardDrawers}
+            currentCardDrawer={currentCardDrawer}
+            currentPlayerId={currentPlayerId}
+            onCardDrawn={advancePhase}
+          />
+
+          {/* Sadece sıra sendeyse ve faz CARD_DRAWING ise test butonunu göster */}
+          {currentPlayerId === currentCardDrawer && (
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={handleMockScan}
+                className="px-3 py-2 rounded bg-indigo-600 text-white"
+              >
+                QR kodu okut (test)
+              </button>
+            </div>
+          )}
+        </>
       );
 
     case "DAY_DISCUSSION":
