@@ -133,7 +133,7 @@ export function CardDrawingPhase({
               <div className="bg-slate-900/60 border border-emerald-400 rounded-lg p-6 text-left">
                 <div className="text-emerald-400 text-lg mb-1">✅ Kart bulundu</div>
                 <div className="text-white">
-                  <div className="font-semibold">Efekt: {preview.effectId}</div>
+                  <div className="font-semibold">Efekt: {preview.title}</div>
                   {preview.text && <div className="opacity-80 mt-1">{preview.text}</div>}
                 </div>
                 <div className="flex gap-2 mt-4">
