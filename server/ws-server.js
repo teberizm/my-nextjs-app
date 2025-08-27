@@ -47,8 +47,8 @@ const path = require('path');
 const vm = require('vm');
 
 const DATA_DIR = process.cwd(); // assume files live next to the server, adjust if needed
-const QR_FILE = path.resolve(DATA_DIR, '/data/qr-cards.js');
-const EFFECTS_FILE = path.resolve(DATA_DIR, '/data/effects-catalog.js');
+const QR_FILE = path.resolve(DATA_DIR, 'data/qr-cards.js');
+const EFFECTS_FILE = path.resolve(DATA_DIR, 'data/effects-catalog.js');
 
 function extractConstObjectFromFile(filePath, constName) {
   const code = fs.readFileSync(filePath, 'utf-8');
