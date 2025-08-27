@@ -28,7 +28,9 @@ const wss = new WebSocket.Server({ server });
  *     // Card drawing
  *     selectedCardDrawers: string[],
  *     currentCardDrawerIndex: number,
- *     currentCardDrawer: string | null
+ *     currentCardDrawer: string | null,
+ *     // QR card pending
+ *     pendingCard: { playerId: string, token: string, effectId: string } | null
  *   },
  *   timer: NodeJS.Timeout | null
  * }
@@ -40,17 +42,16 @@ const now = () => Date.now();
 const toPlain = (obj) =>
   JSON.parse(JSON.stringify(obj, (k, v) => (v instanceof Date ? v.toISOString() : v)));
 
-
 /* ---------------- QR Card system (real data from files) ---------------- */
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const ROOT_DIR = path.resolve(__dirname, '..'); // server/.. => proje kökü
+// data klasörü server klasörünün bir üstünde beklenir: /srv/apps/myapp/data
+const ROOT_DIR = path.resolve(__dirname, '..');
 const QR_FILE = path.join(ROOT_DIR, 'data', 'qr-cards.js');
 const EFFECTS_FILE = path.join(ROOT_DIR, 'data', 'effects-catalog.js');
 
-// Tanı koymaya yardımcı log (ilk çalıştırmada gör)
 console.log('QR_FILE =>', QR_FILE, 'exists=', fs.existsSync(QR_FILE));
 console.log('EFFECTS_FILE =>', EFFECTS_FILE, 'exists=', fs.existsSync(EFFECTS_FILE));
 
@@ -375,7 +376,6 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       return { ok:true, targetId:t.id, title, desc };
     }
 
-
     /* 9 */ case 'REVEAL_TRUE_ROLE_TO_ACTOR': {
       const alive = alivePlayers().filter(p=>p.id!==actorId);
       if (!alive.length) return { ok:false, note:'Canlı yok' };
@@ -459,7 +459,6 @@ function assignRolesServer(players, settings) {
 
   const allInnocent = [...innocentOnly, ...convertible];
   while (roles.length < players.length) {
-    // 🔧 FIX: "all innoc ent" yazım hatası düzeltildi
     roles.push(allInnocent[Math.floor(Math.random() * allInnocent.length)]);
   }
 
@@ -1046,7 +1045,7 @@ function advancePhase(roomId) {
       else startPhase(roomId, 'DAY_DISCUSSION', settings.dayDuration);
       break;
     case 'CARD_DRAWING':
-      // Artık burada otomatik geçiş YOK; onay gelince CARD_CONFIRM içinde DAY_DISCUSSION'a geçiyoruz.
+      // onay gelince CARD_CONFIRM içinde geçilecek
       break;
     case 'DAY_DISCUSSION':
       startPhase(roomId, 'VOTE', settings.voteDuration);
@@ -1096,14 +1095,14 @@ wss.on('connection', (ws) => {
           rooms.set(joinRoomId, {
             players: new Map(),
             sockets: new Set(),
-            settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 }, // default 1
+            settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 },
             state: {
               phase: 'LOBBY',
               currentTurn: 1,
               nightActions: [],
               votes: {},
-              
-// QR effects state
+
+              // QR effects state
               cardShieldsNextNight: [],
               reflectAttacksTonight: [],
               reverseProtectEffectsTonight: false,
@@ -1117,7 +1116,7 @@ wss.on('connection', (ws) => {
               scapegoatToday: [],
               loversPairs: [],
               resurrectionStone: null,
-    
+
               deathsThisTurn: [],
               deathLog: [],
               bombTargets: [],
@@ -1128,6 +1127,8 @@ wss.on('connection', (ws) => {
               selectedCardDrawers: [],
               currentCardDrawerIndex: 0,
               currentCardDrawer: null,
+              // pending card
+              pendingCard: null,
             },
             timer: null,
             ownerId: null,
@@ -1232,7 +1233,7 @@ wss.on('connection', (ws) => {
         room.state.scapegoatToday = [];
         room.state.loversPairs = [];
         room.state.resurrectionStone = null;
-    
+        room.state.pendingCard = null;
 
         startPhase(rid, 'ROLE_REVEAL', 10);
 
@@ -1318,16 +1319,27 @@ wss.on('connection', (ws) => {
         if (ws.playerId !== S.currentCardDrawer) break;
 
         const token = payload?.token;
-        const options = QR_CARDS[token];
-        if (!options || options.length === 0) {
+        const effects = Array.isArray(QR_CARDS[token]) ? QR_CARDS[token] : [];
+        if (effects.length === 0) {
           sendToPlayer(room, ws.playerId, 'CARD_PREVIEW', { error: 'Geçersiz veya tanımsız QR kodu.' });
           break;
         }
-        const chosenEffectId = randPick(options);
-        const eff = EFFECTS_CATALOG[chosenEffectId] || null;
+
+        const picked = effects[Math.floor(Math.random() * effects.length)];
+        const effectId = (typeof picked === 'string') ? picked : (picked?.effectId || picked?.id || null);
+        if (!effectId) {
+          sendToPlayer(room, ws.playerId, 'CARD_PREVIEW', { error: 'QR içeriği tanınamadı.' });
+          break;
+        }
+
+        const eff = EFFECTS_CATALOG[effectId] || null;
+
+        // Confirm eşleşmesi için pending kaydet
+        S.pendingCard = { playerId: ws.playerId, token, effectId };
+
         sendToPlayer(room, ws.playerId, 'CARD_PREVIEW', {
-          effectId: chosenEffectId,
-          title: eff?.title || chosenEffectId,
+          effectId,
+          title: eff?.title || effectId,
           text: eff?.desc || '',
           token,
         });
@@ -1343,9 +1355,19 @@ wss.on('connection', (ws) => {
         if (ws.playerId !== S.currentCardDrawer) break;
 
         const effectId = payload?.effectId;
+
+        // pending doğrulaması
+        const pc = S.pendingCard;
+        if (!pc || pc.playerId !== ws.playerId || pc.effectId !== effectId) {
+          sendToPlayer(room, ws.playerId, 'CARD_PREVIEW', { error: 'Kart oturumu bulunamadı' });
+          break;
+        }
+
         const extra = { targetId: payload?.targetId };
         const result = applyCardEffect(room, ws.playerId, effectId, extra);
 
+        // clear pending & bildir
+        S.pendingCard = null;
         sendToPlayer(room, ws.playerId, 'CARD_APPLIED_PRIVATE', { effectId, result });
 
         // herkes güncel durumu görsün
@@ -1385,7 +1407,7 @@ wss.on('connection', (ws) => {
           selectedCardDrawers: [],
           currentCardDrawerIndex: 0,
           currentCardDrawer: null,
-        
+
           // QR effects state
           cardShieldsNextNight: [],
           reflectAttacksTonight: [],
@@ -1400,8 +1422,8 @@ wss.on('connection', (ws) => {
           scapegoatToday: [],
           loversPairs: [],
           resurrectionStone: null,
+          pendingCard: null,
         };
-        
 
         clearTimer(room);
 
@@ -1419,98 +1441,6 @@ wss.on('connection', (ws) => {
         broadcast(room, 'RESET_GAME', { players: Array.from(room.players.values()) });
         break;
       }
-              case 'CARD_QR_SCANNED': {
-  const rid2 = roomId || ws.roomId;
-  const pid2 = playerId || ws.playerId;
-  const room = rooms.get(rid2);
-  const S = room?.state;
-  const token = payload?.token;
-
-  if (!room || !S || !pid2 || !token) break;
-  if (S.phase !== 'CARD_DRAWING' || S.currentCardDrawer !== pid2) {
-    break; // sırası değilse yok say
-  }
-
-  // 🔧 Burayı sağlamlaştır: QR_CARDS[token] mutlaka dizi olmalı (string[] veya {effectId}[])
-  const effects = Array.isArray(QR_CARDS[token]) ? QR_CARDS[token] : [];
-  if (effects.length === 0) {
-    // Mesajı biraz daha açıklayıcı yapalım:
-    sendToPlayer(room, pid2, 'CARD_PREVIEW', { error: 'Geçersiz QR veya veri yüklenemedi (QR_CARDS boş).' });
-    break;
-  }
-
-  // Rastgele bir effectId seç (string[] veya obje[])
-  const picked = effects[Math.floor(Math.random() * effects.length)];
-  const effectId = (typeof picked === 'string') ? picked : (picked?.effectId || picked?.id || null);
-  if (!effectId) {
-    sendToPlayer(room, pid2, 'CARD_PREVIEW', { error: 'QR içeriği tanınamadı.' });
-    break;
-  }
-
-  const effectMeta = EFFECTS_CATALOG[effectId] || {};
-  const text = effectMeta?.title || picked?.text || String(effectId);
-
-  // Pending kaydet → onay eşleşmesi için
-  S.pendingCard = { playerId: pid2, token, effectId };
-
-  // Yalnız oyuncuya önizleme
-  sendToPlayer(room, pid2, 'CARD_PREVIEW', { effectId, text });
-  break;
-}
-
-case 'CARD_CONFIRM': {
-  const rid2 = roomId || ws.roomId;
-  const pid2 = playerId || ws.playerId;
-  const room = rooms.get(rid2);
-  const S = room?.state;
-  const effectId = payload?.effectId;
-
-  if (!room || !S || !pid2 || !effectId) break;
-  if (S.phase !== 'CARD_DRAWING' || S.currentCardDrawer !== pid2) break;
-
-  // Pending doğrulaması
-  const pc = S.pendingCard;
-  if (!pc || pc.playerId !== pid2 || pc.effectId !== effectId) {
-    sendToPlayer(room, pid2, 'CARD_PREVIEW', { error: 'Kart oturumu bulunamadı' });
-    break;
-  }
-
-  const result = applyCardEffect(room, pid2, effectId, payload?.extra || {});
-  delete S.pendingCard;
-
-  sendToPlayer(room, pid2, 'CARD_APPLIED_PRIVATE', { result });
-  broadcastSnapshot(rid2);
-
-  const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 };
-  if (result?.skipDay) {
-    startPhase(rid2, 'NIGHT', settings.nightDuration);
-  } else {
-    startPhase(rid2, 'DAY_DISCUSSION', settings.dayDuration);
-  }
-  break;
-}
-
-        // Etkiyi uygula
-        const result = applyCardEffect(room, pid2, effectId, payload?.extra || {});
-        delete S.pendingCard;
-
-        // Oyuncuya özel sonuç
-        sendToPlayer(room, pid2, 'CARD_APPLIED_PRIVATE', { result });
-
-        // Tüm odaya snapshot
-        broadcastSnapshot(rid2);
-
-        // Fazı ilerlet (tek çekilişlik)
-        const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 };
-        if (result?.skipDay) {
-          // “Günü atla, geceye geç”
-          startPhase(rid2, 'NIGHT', settings.nightDuration);
-        } else {
-          startPhase(rid2, 'DAY_DISCUSSION', settings.dayDuration);
-        }
-        break;
-      }
-
 
       default:
         break;
