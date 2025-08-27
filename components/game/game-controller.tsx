@@ -36,7 +36,7 @@ export function GameController({
     votes,
     advancePhase,
     submitNightAction,
-    // submitVote, // ❌ artık doğrudan wsClient kullanıyoruz
+    // submitVote,
     resetGame,
     nightActions,
     selectedCardDrawers,
@@ -47,17 +47,10 @@ export function GameController({
     playerNotes,
   } = useGameState(currentPlayerId);
 
-  // Owner bilgisini initialPlayers'tan (WS snapshot) belirle – oyun başlamadan önce de doğru olur
   const isOwnerFromInitial = useMemo(() => {
     return initialPlayers.find((p) => p.id === currentPlayerId)?.isOwner === true;
   }, [initialPlayers, currentPlayerId]);
 
-  /**
-   * Emniyet ağı:
-   * - Oyun başlamadıysa,
-   * - owner bizsek ve odada en az 4 kişi varsa
-   * bir defa GAME_STARTED yayınla.
-   */
   useEffect(() => {
     if (!game && isOwnerFromInitial && initialPlayers.length >= 4) {
       const t = setTimeout(() => {
@@ -89,15 +82,25 @@ export function GameController({
     submitNightAction(currentPlayer.id, targetId, actionType);
   };
 
-  // 🔴 Kritik: Oy artık doğrudan wsClient ile sunucuya gider
   const handleVote = (targetId: string) => {
     console.log("[UI] SUBMIT_VOTE click ->", targetId);
     wsClient.sendEvent("SUBMIT_VOTE" as any, { targetId });
   };
 
-  // ✅ Yeni: QR okut (test) butonu — sabit token gönderir
+  // ✅ QR kodu okut (test): Sunucu rastgele QR-ID seçsin
   const handleMockScan = () => {
-    wsClient.sendEvent("CARD_QR_SCANNED" as any, { token: "94138491230" });
+    // Önerilen yol: sunucuda DRAW_QR_CARD_TEST case'i
+    wsClient.sendEvent("DRAW_QR_CARD_TEST" as any, {
+      roomId: game.roomId,
+      playerId: currentPlayerId,
+    });
+
+    // Eğer sunucuda test case'i yoksa şu alternatifi kullanın:
+    // wsClient.sendEvent("DRAW_QR_CARD" as any, {
+    //   roomId: game.roomId,
+    //   playerId: currentPlayerId,
+    //   payload: { qrId: "__RANDOM__" } // sunucu '__RANDOM__' gelirse random seçsin
+    // });
   };
 
   const hasVoted = currentPlayer.id in votes;
