@@ -34,9 +34,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     dayDuration: 120,
     voteDuration: 45,
   });
-  const [game, setGame] = useState<any | null>(null);
 
-  // --- Kart çekme akışına dair istemci durumları (basit) ---
+  // Kart çekme fazında, sunucunun bildirdiği sıradaki oyuncu (yalnız UI amaçlı)
   const [currentCardDrawer, setCurrentCardDrawer] = useState<string | null>(null);
 
   // Odaya giriş (sadece kendi kimliğimizi oluşturuyoruz; oyuncu listesi sunucudan gelecek)
@@ -101,7 +100,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         console.log("[client] PHASE_CHANGED", data.payload);
         setGamePhase(next);
       }
-      // kart çekme sırasında sıradaki oyuncu id'sini tutalım (bekleme ekranı için)
       setCurrentCardDrawer(drawer);
     };
 
@@ -117,38 +115,13 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       if (s.phase) setGamePhase(s.phase as GamePhase);
       if ("currentCardDrawer" in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
     };
-
+    const onCardDrawReady = () => {
+  // no-op
+};
     // 🔥 Ayarlar güncellendi → tüm istemcilerde UI'ı senkronla
     const onSettingsUpdated = (data: any) => {
       const settings = data?.payload?.settings as GameSettings | undefined;
       if (settings) setGameSettings(settings);
-    };
-
-    // --- Kart çekme akışı: sadece sırası gelen oyuncuya özel mesajlar ---
-    const onCardDrawReady = () => {
-      // Basit test akışı: prompt ile QR (token) iste
-      const token = typeof window !== "undefined" ? window.prompt("QR kodunu okut / değeri gir:") : null;
-      if (token && token.trim().length > 0) {
-        wsClient.sendEvent("CARD_QR_SCANNED", { token: token.trim() });
-      }
-    };
-
-    const onCardPreview = (data: any) => {
-      const { text, effectId, error } = data?.payload || {};
-      if (error) {
-        if (typeof window !== "undefined") window.alert(error);
-        return;
-      }
-      // Basit onay: “TAMAM!” deyince CARD_CONFIRM gönder
-      const ok = typeof window !== "undefined" ? window.confirm(String(text || "Kart")) : true;
-      if (ok && effectId) {
-        wsClient.sendEvent("CARD_CONFIRM", { effectId });
-      }
-    };
-
-    const onCardAppliedPrivate = (data: any) => {
-      console.log("[client] CARD_APPLIED_PRIVATE", data?.payload);
-      // İstersen burada küçük bir toast gösterebilirsin
     };
 
     // --- Subscribe ---
@@ -159,9 +132,8 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     wsClient.on("STATE_SNAPSHOT", onSnapshot);
     wsClient.on("SETTINGS_UPDATED", onSettingsUpdated);
 
-    wsClient.on("CARD_DRAW_READY", onCardDrawReady);
-    wsClient.on("CARD_PREVIEW", onCardPreview);
-    wsClient.on("CARD_APPLIED_PRIVATE", onCardAppliedPrivate);
+    // ⚠️ Kart çekme/QR ile ilgili event’leri burada ELLEME —
+    // CardDrawingPhase kendi içinde CARD_DRAW_READY / CARD_PREVIEW / CARD_APPLIED_PRIVATE dinliyor.
 
     // --- Cleanup ---
     return () => {
@@ -171,11 +143,6 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       wsClient.off("PHASE_CHANGED", onPhaseChanged);
       wsClient.off("STATE_SNAPSHOT", onSnapshot);
       wsClient.off("SETTINGS_UPDATED", onSettingsUpdated);
-
-      wsClient.off("CARD_DRAW_READY", onCardDrawReady);
-      wsClient.off("CARD_PREVIEW", onCardPreview);
-      wsClient.off("CARD_APPLIED_PRIVATE", onCardAppliedPrivate);
-
       wsClient.disconnect();
     };
   }, [currentPlayer, currentRoom.inviteCode]);
@@ -233,7 +200,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
         <RoomLobby
           room={currentRoom}
           currentPlayer={currentPlayer}
-          gameSettings={game?.settings ?? gameSettings}
+          gameSettings={gameSettings}
           onStartGame={handleStartGame}
           onKickPlayer={handleKickPlayer}
           onToggleLock={handleToggleLock}
@@ -242,7 +209,7 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       ) : (
         <GameController
           initialPlayers={currentRoom.players}
-          gameSettings={game?.settings ?? gameSettings}
+          gameSettings={gameSettings}
           currentPlayerId={currentPlayer.id}
           onGameEnd={handleGameEnd}
           // İstersen GameController içinde bekleme yazısı için bu bilgiyi kullan:
