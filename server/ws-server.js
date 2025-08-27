@@ -916,10 +916,7 @@ function processNightActions(roomId) {
   broadcastSnapshot(roomId);
 
   startPhase(roomId, 'NIGHT_RESULTS', 5);
-}
-)
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
+} 
   guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
       blockedPlayers.add(a.targetId);
