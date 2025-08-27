@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import jsQR from "jsqr";
 
 type QrScannerProps = {
   open: boolean;
@@ -21,6 +22,7 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [torchOn, setTorchOn] = useState(false);
   const rafRef = useRef<number | null>(null);
+  const loopTimer = useRef<any>(null);
   const stoppedRef = useRef(false);
 
   useEffect(() => {
@@ -44,13 +46,12 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
         const s = await navigator.mediaDevices.getUserMedia(constraints);
         if (!active) return;
         setStream(s);
-        if (videoRef.current) {
-          videoRef.current.srcObject = s;
-          await videoRef.current.play();
-          loopDetect();
-        }
+        const v = videoRef.current!;
+        v.srcObject = s;
+        await v.play();
+        startDetectLoop();
       } catch (e: any) {
-        setErr(e?.message ?? "Kamera açılamadı.");
+        setErr(e?.message ?? "Kamera açılamadı. Lütfen tarayıcı izinlerini kontrol edin.");
       }
     })();
 
@@ -61,6 +62,18 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  function stopAll() {
+    stoppedRef.current = true;
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    if (loopTimer.current) clearTimeout(loopTimer.current);
+    loopTimer.current = null;
+    if (stream) {
+      stream.getTracks().forEach((t) => t.stop());
+    }
+    setStream(null);
+    setTorchOn(false);
+  }
+
   async function toggleTorch() {
     try {
       const track = stream?.getVideoTracks?.()[0];
@@ -69,57 +82,62 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
       await track.applyConstraints({ advanced: [{ torch: !torchOn }] as any });
       setTorchOn((t) => !t);
     } catch {
-      // sessizce yoksay
+      // no-op
     }
   }
 
-  function stopAll() {
-    stoppedRef.current = true;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-    }
-    setStream(null);
-    setTorchOn(false);
-  }
-
-  async function detectWithBarcodeDetector(v: HTMLVideoElement): Promise<string | null> {
-    if (!("BarcodeDetector" in window)) return null;
-    try {
-      const det = new window.BarcodeDetector({ formats: ["qr_code"] });
-      const codes = await det.detect(v);
-      if (Array.isArray(codes) && codes.length > 0) {
-        const raw = codes[0]?.rawValue || codes[0]?.rawData;
-        return typeof raw === "string" ? raw : null;
-      }
-    } catch {
-      // tarayıcı desteklemiyorsa sessiz geç
-    }
-    return null;
-  }
-
-  function loopDetect() {
-    if (!videoRef.current || !canvasRef.current) return;
-    if (stoppedRef.current) return;
-
-    const v = videoRef.current;
-    const c = canvasRef.current;
-    const ctx = c.getContext("2d");
+  function startDetectLoop() {
+    const v = videoRef.current!;
+    const c = canvasRef.current!;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
 
-    c.width = v.videoWidth || 640;
-    c.height = v.videoHeight || 360;
-    ctx.drawImage(v, 0, 0, c.width, c.height);
+    const tryDetect = async () => {
+      if (stoppedRef.current) return;
 
-    detectWithBarcodeDetector(v).then((text) => {
-      if (text && !stoppedRef.current) {
+      const vw = v.videoWidth || 640;
+      const vh = v.videoHeight || 360;
+      if (vw === 0 || vh === 0) {
+        loopTimer.current = setTimeout(tryDetect, 120);
+        return;
+      }
+
+      // Canvas boyutunu güncelle
+      c.width = vw;
+      c.height = vh;
+      ctx.drawImage(v, 0, 0, vw, vh);
+
+      // 1) BarcodeDetector varsa önce onu dene
+      let decoded: string | null = null;
+      if ("BarcodeDetector" in window) {
+        try {
+          const det = new window.BarcodeDetector({ formats: ["qr_code"] });
+          const codes = await det.detect(v);
+          if (codes?.length) decoded = String(codes[0]?.rawValue ?? "");
+        } catch {
+          // devam, jsQR fallback'e düş
+        }
+      }
+
+      // 2) jsQR fallback
+      if (!decoded) {
+        const imageData = ctx.getImageData(0, 0, vw, vh);
+        // İstersen merkez kırpma için ROI yapabilirsin, şimdilik tam kare:
+        const code = jsQR(imageData.data, vw, vh, { inversionAttempts: "attemptBoth" });
+        if (code?.data) decoded = code.data;
+      }
+
+      if (decoded && !stoppedRef.current) {
         stoppedRef.current = true;
-        onDetected(String(text).trim());
+        onDetected(decoded.trim());
         stopAll();
       } else {
-        rafRef.current = requestAnimationFrame(loopDetect);
+        // Döngüyü sürdürelim
+        loopTimer.current = setTimeout(tryDetect, 120);
       }
-    });
+    };
+
+    tryDetect();
   }
 
   return (
@@ -132,6 +150,7 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
               type="button"
               onClick={toggleTorch}
               className="px-3 py-1.5 rounded bg-slate-700 text-white"
+              title="Cihaz destekliyorsa fener"
             >
               {torchOn ? "Fener Kapat" : "Fener Aç"}
             </button>
@@ -155,12 +174,11 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
             <>
               <div className="relative rounded-lg overflow-hidden border border-cyan-500">
                 <video ref={videoRef} className="w-full h-auto" playsInline muted />
-                {/* hedefleme çerçevesi */}
                 <div className="pointer-events-none absolute inset-0 border-2 border-cyan-400 rounded-lg m-8" />
               </div>
               <canvas ref={canvasRef} className="hidden" />
               <p className="text-slate-300 text-sm mt-3">
-                Kamerayı QR koda yöneltin. Kod algılanınca otomatik devam eder.
+                Kamerayı QR koda yöneltin. HTTPS üzerinde ve kamera izni açık olmalı.
               </p>
             </>
           )}
