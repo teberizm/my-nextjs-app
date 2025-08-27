@@ -137,30 +137,15 @@ export function GameController({
       return <DeathAnnouncement deaths={deathsThisTurn} timeRemaining={timeRemaining} />;
 
     case "CARD_DRAWING":
-      return (
-        <>
-          <CardDrawingPhase
-            players={players}
-            selectedCardDrawers={selectedCardDrawers}
-            currentCardDrawer={currentCardDrawer}
-            currentPlayerId={currentPlayerId}
-            onCardDrawn={advancePhase}
-          />
-
-          {/* Sadece sıra sendeyse ve faz CARD_DRAWING ise test butonunu göster */}
-          {currentPlayerId === currentCardDrawer && (
-            <div className="mt-4 flex justify-center">
-              <button
-                type="button"
-                onClick={handleMockScan}
-                className="px-3 py-2 rounded bg-indigo-600 text-white"
-              >
-                QR kodu okut (test)
-              </button>
-            </div>
-          )}
-        </>
-      );
+  return (
+    <CardDrawingPhase
+      players={players}
+      selectedCardDrawers={selectedCardDrawers}
+      currentCardDrawer={currentCardDrawer}
+      currentPlayerId={currentPlayerId}
+      onCardDrawn={advancePhase}
+    />
+  );
 
     case "DAY_DISCUSSION":
       return (
