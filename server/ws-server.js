@@ -28,11 +28,7 @@ const wss = new WebSocket.Server({ server });
  *     // Card drawing
  *     selectedCardDrawers: string[],
  *     currentCardDrawerIndex: number,
- *     currentCardDrawer: string | null,
- *     // Card flags (single-use)
- *     cardFlags: {
- *       doubleVote: Record<string, boolean>
- *     }
+ *     currentCardDrawer: string | null
  *   },
  *   timer: NodeJS.Timeout | null
  * }
@@ -46,18 +42,23 @@ const toPlain = (obj) =>
 
 /* ---------------- QR Card Pool (example: 2 IDs x 3 events) ---------------- */
 const QR_CARDS = {
-  "94138491230": [
-    { effectId: "REVIVE_RANDOM_FROM_DEATHS_THIS_TURN", text: "Eğer bu tur birisi öldüyse, ölenler arasından rastgele 1 kişiyi dirilt." },
-    { effectId: "GIVE_RANDOM_ALIVE_SHIELD", text: "Rastgele bir canlı oyuncuya kalkan ver (bu gece korur)." },
-    { effectId: "NO_OP", text: "Boş kart. Hiçbir şey olmaz." },
+  '94138491230': [
+    {
+      effectId: 'REVIVE_RANDOM_FROM_DEATHS_THIS_TURN',
+      text: 'Eğer bu tur birisi öldüyse, ölenler arasından rastgele 1 kişiyi dirilt.',
+    },
+    { effectId: 'GIVE_RANDOM_ALIVE_SHIELD', text: 'Rastgele bir canlı oyuncuya kalkan ver (bu gece korur).' },
+    { effectId: 'NO_OP', text: 'Boş kart. Hiçbir şey olmaz.' },
   ],
-  "94138491231": [
-    { effectId: "GIVE_RANDOM_ALIVE_SHIELD", text: "Rastgele bir canlı oyuncuyu koru (kalkan)." },
-    { effectId: "REVIVE_RANDOM_FROM_DEATHS_THIS_TURN", text: "Bu tur ölenlerden birini rastgele dirilt." },
-    { effectId: "NO_OP", text: "Boş kart. Hiçbir şey olmaz." },
+  '94138491231': [
+    { effectId: 'GIVE_RANDOM_ALIVE_SHIELD', text: 'Rastgele bir canlı oyuncuyu koru (kalkan).' },
+    { effectId: 'REVIVE_RANDOM_FROM_DEATHS_THIS_TURN', text: 'Bu tur ölenlerden birini rastgele dirilt.' },
+    { effectId: 'NO_OP', text: 'Boş kart. Hiçbir şey olmaz.' },
   ],
 };
-function randPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+function randPick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
 function sendToPlayer(room, playerId, type, payload) {
   for (const s of room.sockets) {
     if (s.readyState === WebSocket.OPEN && s.playerId === playerId) {
@@ -67,14 +68,14 @@ function sendToPlayer(room, playerId, type, payload) {
   }
 }
 /* Effects are applied authoritatively on server */
-function applyCardEffect(room, effectId, actorId) {
+function applyCardEffect(room, effectId) {
   const S = room.state;
   const players = Array.from(room.players.values());
 
   switch (effectId) {
-    case "REVIVE_RANDOM_FROM_DEATHS_THIS_TURN": {
+    case 'REVIVE_RANDOM_FROM_DEATHS_THIS_TURN': {
       const deaths = Array.isArray(S.deathsThisTurn) ? S.deathsThisTurn : [];
-      if (deaths.length === 0) return { ok: false, note: "Bu tur kimse ölmedi." };
+      if (deaths.length === 0) return { ok: false, note: 'Bu tur kimse ölmedi.' };
       const target = randPick(deaths);
       const p = room.players.get(target.id);
       if (p) {
@@ -83,70 +84,15 @@ function applyCardEffect(room, effectId, actorId) {
       }
       return { ok: true, revivedId: target.id };
     }
-    case "GIVE_RANDOM_ALIVE_SHIELD": {
-      const alive = players.filter(p => p.isAlive);
-      if (alive.length === 0) return { ok: false, note: "Canlı oyuncu yok." };
+    case 'GIVE_RANDOM_ALIVE_SHIELD': {
+      const alive = players.filter((p) => p.isAlive);
+      if (alive.length === 0) return { ok: false, note: 'Canlı oyuncu yok.' };
       const tgt = randPick(alive);
       const p = room.players.get(tgt.id);
       if (p) p.hasShield = true;
       return { ok: true, shieldedId: tgt.id };
     }
-
-    // ----- New 4 effects -----
-    case "DOUBLE_VOTE": {
-      if (!actorId) return { ok: false, note: "Aktör yok." };
-      S.cardFlags = S.cardFlags || { doubleVote: {} };
-      S.cardFlags.doubleVote = S.cardFlags.doubleVote || {};
-      S.cardFlags.doubleVote[actorId] = true;
-      return { ok: true, flag: "doubleVote" };
-    }
-
-    case "EXPLODING_CARD": {
-      if (!actorId) return { ok: false, note: "Aktör yok." };
-      const p = room.players.get(actorId);
-      if (p && p.isAlive) {
-        p.isAlive = false;
-        S.deathsThisTurn = [...(S.deathsThisTurn || []), { ...p }];
-        S.deathLog = [...(S.deathLog || []), { ...p }];
-        S.playerNotes[actorId] = [
-          ...(S.playerNotes[actorId] || []),
-          `${S.currentTurn}. Gün: 'Patlayan Kart' seni öldürdü.`
-        ];
-      }
-      return { ok: true, eliminatedId: actorId };
-    }
-
-    case "MASS_NOTE_INNOCENT_FAKE": {
-      const innocents = players.filter(
-        (x) => x.isAlive && x.role !== "BOMBER" && !(x.role === "EVIL_GUARDIAN" || x.role === "EVIL_WATCHER" || x.role === "EVIL_DETECTIVE")
-      );
-      if (innocents.length === 0) return { ok: false, note: "Masum canlı yok." };
-      const tgt = randPick(innocents);
-      const fakeLine = `${S.currentTurn}. Gün: Tartışmada agresif davrandı (oturum notu).`;
-      S.playerNotes[tgt.id] = [...(S.playerNotes[tgt.id] || []), fakeLine];
-      return { ok: true, targetId: tgt.id };
-    }
-
-    case "HINT_BLUR": {
-      const pool = players.filter((p) => p.id !== actorId);
-      if (!actorId || pool.length === 0) return { ok: false, note: "Yetersiz hedef." };
-      const target = randPick(pool);
-
-      const rolePool = ["DOCTOR","GUARDIAN","WATCHER","DETECTIVE","BOMBER","SURVIVOR"];
-      const r1 = target.role && rolePool.includes(target.role) ? target.role : randPick(rolePool);
-      let r2 = randPick(rolePool);
-      if (r2 === r1) r2 = rolePool[(rolePool.indexOf(r1)+1)%rolePool.length];
-
-      // aktöre özel ipucu
-      sendToPlayer(room, actorId, "CARD_APPLIED_PRIVATE", {
-        effectId: "HINT_BLUR",
-        result: { ok: true, hint: `${target.name} için olası roller: ${r1} / ${r2}` }
-      });
-      return { ok: true };
-    }
-    // -------------------------
-
-    case "NO_OP":
+    case 'NO_OP':
     default:
       return { ok: true, noop: true };
   }
@@ -204,6 +150,7 @@ function assignRolesServer(players, settings) {
 
   const allInnocent = [...innocentOnly, ...convertible];
   while (roles.length < players.length) {
+    // 🔧 FIX: "all innoc ent" yazım hatası düzeltildi
     roles.push(allInnocent[Math.floor(Math.random() * allInnocent.length)]);
   }
 
@@ -277,15 +224,15 @@ function startPhase(roomId, phase, durationSec) {
   // 🔽 Kart çekme fazına girerken: 1 canlı oyuncu seç, yalnız ona READY gönder
   if (phase === 'CARD_DRAWING') {
     const S = room.state;
-    const alive = Array.from(room.players.values()).filter(p => p.isAlive);
+    const alive = Array.from(room.players.values()).filter((p) => p.isAlive);
     const count = Math.min(1, alive.length); // şimdilik 1'e sabit
-    const order = alive.map(p => p.id).sort(() => Math.random() - 0.5).slice(0, count);
+    const order = alive.map((p) => p.id).sort(() => Math.random() - 0.5).slice(0, count);
     S.selectedCardDrawers = order;
     S.currentCardDrawerIndex = 0;
     S.currentCardDrawer = order[0] || null;
     if (S.currentCardDrawer) {
-      sendToPlayer(room, S.currentCardDrawer, "CARD_DRAW_READY", {
-        message: "Kamerayı aç ve QR kartını okut.",
+      sendToPlayer(room, S.currentCardDrawer, 'CARD_DRAW_READY', {
+        message: 'Kamerayı aç ve QR kartını okut.',
       });
     }
   }
@@ -331,7 +278,10 @@ function processNightActions(roomId) {
   guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
       blockedPlayers.add(a.targetId);
-      S.playerNotes[a.targetId] = [...(S.playerNotes[a.targetId] || []), `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`];
+      S.playerNotes[a.targetId] = [
+        ...(S.playerNotes[a.targetId] || []),
+        `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`,
+      ];
     }
   });
 
@@ -410,23 +360,29 @@ function processNightActions(roomId) {
 
     if (action.actionType === 'INVESTIGATE' && target) {
       if (actor.role === 'DELI') {
-        const pool = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
-        const r1 = pool[Math.floor(Math.random()*pool.length)];
-        let r2 = pool[Math.floor(Math.random()*pool.length)];
-        if (r2 === r1) r2 = pool[(pool.indexOf(r1)+1)%pool.length];
+        const pool = ['DOCTOR', 'GUARDIAN', 'WATCHER', 'DETECTIVE', 'BOMBER', 'SURVIVOR'];
+        const r1 = pool[Math.floor(Math.random() * pool.length)];
+        let r2 = pool[Math.floor(Math.random() * pool.length)];
+        if (r2 === r1) r2 = pool[(pool.indexOf(r1) + 1) % pool.length];
         result = { type: 'DETECT', roles: [r1, r2] };
       } else if (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') {
         const visitors = S.nightActions
-          .filter((a) => a.targetId === target.id && a.playerId !== actor.id && a.playerId !== target.id && !blockedPlayers.has(a.playerId))
+          .filter(
+            (a) =>
+              a.targetId === target.id &&
+              a.playerId !== actor.id &&
+              a.playerId !== target.id &&
+              !blockedPlayers.has(a.playerId),
+          )
           .map((a) => players.find((p) => p.id === a.playerId)?.name || '')
           .filter(Boolean);
         result = { type: 'WATCH', visitors };
       } else if (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') {
-        const roles = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
+        const roles = ['DOCTOR', 'GUARDIAN', 'WATCHER', 'DETECTIVE', 'BOMBER', 'SURVIVOR'];
         const actual = target.role;
-        let fake = roles[Math.floor(Math.random()*roles.length)];
-        if (fake === actual) fake = roles[(roles.indexOf(fake)+1)%roles.length];
-        const shown = [actual, fake].sort(() => Math.random()-0.5);
+        let fake = roles[Math.floor(Math.random() * roles.length)];
+        if (fake === actual) fake = roles[(roles.indexOf(fake) + 1) % roles.length];
+        const shown = [actual, fake].sort(() => Math.random() - 0.5);
         result = { type: 'DETECT', roles: [shown[0], shown[1]] };
       }
     }
@@ -451,7 +407,10 @@ function processNightActions(roomId) {
           ? `${prefix} ${target.name} oyuncusunu dirilttin`
           : `${prefix} ${target.name} oyuncusunu diriltmeyi denedin`;
       } else if (result.type === 'WATCH' && target) {
-        const vt = (result.visitors && result.visitors.length > 0) ? result.visitors.join(', ') : 'kimse gelmedi';
+        const vt =
+          result.visitors && result.visitors.length > 0
+            ? result.visitors.join(', ')
+            : 'kimse gelmedi';
         note = `${prefix} ${target.name} oyuncusunu izledin: ${vt}`;
       } else if (result.type === 'DETECT' && target) {
         const [r1, r2] = result.roles || [];
@@ -478,7 +437,10 @@ function processNightActions(roomId) {
     };
     const actorId = updatedActions[detonateIndex].playerId;
     const text = victimNames.length > 0 ? victimNames.join(', ') : 'kimse ölmedi';
-    S.playerNotes[actorId] = [...(S.playerNotes[actorId] || []), `${S.currentTurn}. Gece: bombaları patlattın: ${text}`];
+    S.playerNotes[actorId] = [
+      ...(S.playerNotes[actorId] || []),
+      `${S.currentTurn}. Gece: bombaları patlattın: ${text}`,
+    ];
     newBombTargets = [];
   }
 
@@ -488,17 +450,34 @@ function processNightActions(roomId) {
 
   // 6) Apply effects to players map (authoritative)
   const newPlayersMap = new Map(room.players);
-  Array.from(newPlayersMap.values()).forEach((pl) => { pl.hasShield = false; });
+  Array.from(newPlayersMap.values()).forEach((pl) => {
+    pl.hasShield = false;
+  });
 
-  protectedPlayers.forEach((pid) => { const p = newPlayersMap.get(pid); if (p) p.hasShield = true; });
-  survivorActors.forEach((pid) => { const p = newPlayersMap.get(pid); if (p) p.survivorShields = Math.max((p.survivorShields || 0) - 1, 0); });
-  revived.forEach((pid) => { const p = newPlayersMap.get(pid); if (p) p.isAlive = true; });
+  protectedPlayers.forEach((pid) => {
+    const p = newPlayersMap.get(pid);
+    if (p) p.hasShield = true;
+  });
+  survivorActors.forEach((pid) => {
+    const p = newPlayersMap.get(pid);
+    if (p) p.survivorShields = Math.max((p.survivorShields || 0) - 1, 0);
+  });
+  revived.forEach((pid) => {
+    const p = newPlayersMap.get(pid);
+    if (p) p.isAlive = true;
+  });
 
   Array.from(newPlayersMap.values()).forEach((p) => {
     if (bombVictimIds.includes(p.id) && !revived.has(p.id)) {
-      if (p.isAlive) { p.isAlive = false; newDeaths.push({ ...p }); }
+      if (p.isAlive) {
+        p.isAlive = false;
+        newDeaths.push({ ...p });
+      }
     } else if (targetedIds.includes(p.id) && !protectedPlayers.has(p.id) && !revived.has(p.id)) {
-      if (p.isAlive) { p.isAlive = false; newDeaths.push({ ...p }); }
+      if (p.isAlive) {
+        p.isAlive = false;
+        newDeaths.push({ ...p });
+      }
     }
   });
 
@@ -543,22 +522,17 @@ function processVotes(roomId) {
   Object.entries(S.votes).forEach(([voterId, targetId]) => {
     const voter = players.find((p) => p.id === voterId);
     if (voter?.isAlive && targetId !== 'SKIP') {
-      const weight = S.cardFlags?.doubleVote?.[voterId] ? 2 : 1;
-      voteCount[targetId] = (voteCount[targetId] || 0) + weight;
+      voteCount[targetId] = (voteCount[targetId] || 0) + 1;
     }
   });
-
-  // Çift oy bayraklarını bu tur sonunda temizle
-  if (S.cardFlags && S.cardFlags.doubleVote) {
-    Object.keys(S.votes).forEach((vid) => {
-      if (S.cardFlags.doubleVote[vid]) delete S.cardFlags.doubleVote[vid];
-    });
-  }
 
   let maxVotes = 0;
   let eliminatedId = null;
   Object.entries(voteCount).forEach(([pid, count]) => {
-    if (count > maxVotes) { maxVotes = count; eliminatedId = pid; }
+    if (count > maxVotes) {
+      maxVotes = count;
+      eliminatedId = pid;
+    }
   });
 
   const top = Object.entries(voteCount).filter(([, c]) => c === maxVotes);
@@ -578,7 +552,7 @@ function processVotes(roomId) {
   S.deathsThisTurn = newDeaths;
   if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
 
-  broadcast(room, "VOTE_RESULT", {
+  broadcast(room, 'VOTE_RESULT', {
     votes: S.votes,
     voteCount: voteCount,
     eliminatedId: eliminatedId,
@@ -636,11 +610,18 @@ function advancePhase(roomId) {
 /* -------------- WebSocket events ------------ */
 wss.on('connection', (ws) => {
   ws.isAlive = true;
-  ws.on('pong', () => { ws.isAlive = true; });
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
 
   ws.on('message', (message) => {
     let data;
-    try { data = JSON.parse(message); } catch (e) { console.error('Invalid WS message', e); return; }
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      console.error('Invalid WS message', e);
+      return;
+    }
 
     const { type, payload, roomId, playerId } = data || {};
     const rid = roomId || ws.roomId;
@@ -675,10 +656,6 @@ wss.on('connection', (ws) => {
               selectedCardDrawers: [],
               currentCardDrawerIndex: 0,
               currentCardDrawer: null,
-              // flags
-              cardFlags: {
-                doubleVote: {},
-              },
             },
             timer: null,
             ownerId: null,
@@ -720,7 +697,9 @@ wss.on('connection', (ws) => {
 
         if (targetSocket) {
           targetSocket.send(JSON.stringify({ type: 'PLAYER_KICKED', payload: { playerId: targetId } }));
-          try { targetSocket.close(); } catch (_) {}
+          try {
+            targetSocket.close();
+          } catch (_) {}
         }
 
         room.players.delete(targetId);
@@ -767,8 +746,6 @@ wss.on('connection', (ws) => {
         room.state.selectedCardDrawers = [];
         room.state.currentCardDrawerIndex = 0;
         room.state.currentCardDrawer = null;
-        // reset flags
-        room.state.cardFlags = { doubleVote: {} };
 
         startPhase(rid, 'ROLE_REVEAL', 10);
 
@@ -823,8 +800,8 @@ wss.on('connection', (ws) => {
         broadcast(room, 'VOTES_UPDATED', { votes: toPlain(room.state.votes) });
         broadcastSnapshot(rid);
 
-        const aliveIds = Array.from(room.players.values()).filter(p => p.isAlive).map(p => p.id);
-        const votedAliveCount = aliveIds.filter(id => Object.prototype.hasOwnProperty.call(room.state.votes, id)).length;
+        const aliveIds = Array.from(room.players.values()).filter((p) => p.isAlive).map((p) => p.id);
+        const votedAliveCount = aliveIds.filter((id) => Object.prototype.hasOwnProperty.call(room.state.votes, id)).length;
 
         if (room.state.phase === 'VOTE' && votedAliveCount >= aliveIds.length) {
           clearTimer(room);
@@ -833,13 +810,13 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case "UPDATE_SETTINGS": {
+      case 'UPDATE_SETTINGS': {
         if (!rid) return;
         const room = rooms.get(rid);
         if (!room) return;
         if (ws.playerId !== room.ownerId) return;
         room.settings = { ...room.settings, ...payload.settings };
-        broadcast(room, "SETTINGS_UPDATED", { settings: room.settings });
+        broadcast(room, 'SETTINGS_UPDATED', { settings: room.settings });
         broadcastSnapshot(rid);
         break;
       }
@@ -856,11 +833,11 @@ wss.on('connection', (ws) => {
         const token = payload?.token;
         const options = QR_CARDS[token];
         if (!options || options.length === 0) {
-          sendToPlayer(room, ws.playerId, "CARD_PREVIEW", { error: "Geçersiz veya tanımsız QR kodu." });
+          sendToPlayer(room, ws.playerId, 'CARD_PREVIEW', { error: 'Geçersiz veya tanımsız QR kodu.' });
           break;
         }
         const chosen = randPick(options); // {effectId, text}
-        sendToPlayer(room, ws.playerId, "CARD_PREVIEW", {
+        sendToPlayer(room, ws.playerId, 'CARD_PREVIEW', {
           effectId: chosen.effectId,
           text: chosen.text,
           token,
@@ -877,10 +854,9 @@ wss.on('connection', (ws) => {
         if (ws.playerId !== S.currentCardDrawer) break;
 
         const effectId = payload?.effectId;
-        const result = applyCardEffect(room, effectId, ws.playerId);
+        const result = applyCardEffect(room, effectId);
 
-        // Uygulama sonrası çekene özel onay
-        sendToPlayer(room, ws.playerId, "CARD_APPLIED_PRIVATE", { effectId, result });
+        sendToPlayer(room, ws.playerId, 'CARD_APPLIED_PRIVATE', { effectId, result });
 
         // herkes güncel durumu görsün
         broadcastSnapshot(rid);
@@ -895,13 +871,13 @@ wss.on('connection', (ws) => {
       }
       /* -------------------------------------- */
 
-      case "RESET_GAME": {
+      case 'RESET_GAME': {
         if (!rid) break;
         const room = rooms.get(rid);
         if (!room) break;
 
         room.state = {
-          phase: "LOBBY",
+          phase: 'LOBBY',
           currentTurn: 1,
           nightActions: [],
           votes: {},
@@ -914,9 +890,6 @@ wss.on('connection', (ws) => {
           selectedCardDrawers: [],
           currentCardDrawerIndex: 0,
           currentCardDrawer: null,
-          cardFlags: {
-            doubleVote: {},
-          },
         };
 
         clearTimer(room);
@@ -932,7 +905,7 @@ wss.on('connection', (ws) => {
           });
         });
 
-        broadcast(room, "RESET_GAME", { players: Array.from(room.players.values()) });
+        broadcast(room, 'RESET_GAME', { players: Array.from(room.players.values()) });
         break;
       }
 
@@ -966,11 +939,15 @@ wss.on('connection', (ws) => {
 const interval = setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) {
-      try { ws.terminate(); } catch (_) {}
+      try {
+        ws.terminate();
+      } catch (_) {}
       return;
     }
     ws.isAlive = false;
-    try { ws.ping(); } catch (_) {}
+    try {
+      ws.ping();
+    } catch (_) {}
   });
 }, 30000);
 
