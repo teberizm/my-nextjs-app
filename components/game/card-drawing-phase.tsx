@@ -1,15 +1,19 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import type { Player } from "@/lib/types"
+import { useEffect, useState } from "react";
+import type { Player } from "@/lib/types";
+import { wsClient } from "@/lib/websocket-client";
+import QrScanner from "@/components/qr-scanner";
 
 interface CardDrawingPhaseProps {
-  players: Player[]
-  selectedCardDrawers: string[]
-  currentCardDrawer: string | null
-  currentPlayerId: string
-  onCardDrawn: () => void
+  players: Player[];
+  selectedCardDrawers: string[];
+  currentCardDrawer: string | null;
+  currentPlayerId: string;
+  onCardDrawn: () => void;
 }
+
+type PreviewPayload = { effectId?: string; text?: string; error?: string };
 
 export function CardDrawingPhase({
   players,
@@ -18,23 +22,69 @@ export function CardDrawingPhase({
   currentPlayerId,
   onCardDrawn,
 }: CardDrawingPhaseProps) {
-  const [isScanning, setIsScanning] = useState(false)
-  const [scannedCard, setScannedCard] = useState<string | null>(null)
+  const [openScanner, setOpenScanner] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const [preview, setPreview] = useState<PreviewPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const currentDrawerPlayer = players.find((p) => p.id === currentCardDrawer)
-  const isMyTurn = currentCardDrawer === currentPlayerId
-  const currentDrawerIndex = selectedCardDrawers.indexOf(currentCardDrawer || "") + 1
+  const currentDrawerPlayer = players.find((p) => p.id === currentCardDrawer);
+  const isMyTurn = currentCardDrawer === currentPlayerId;
+  const currentDrawerIndex = selectedCardDrawers.indexOf(currentCardDrawer || "") + 1;
 
-  const handleQRScan = () => {
-    setIsScanning(true)
-    setTimeout(() => {
-      setIsScanning(false)
-      setScannedCard("QR Kodu Okundu!")
-      // Auto advance after successful scan
-      setTimeout(() => {
-        onCardDrawn()
-      }, 1500)
-    }, 2000)
+  // Sunucudan gelen özel event'leri dinle
+  useEffect(() => {
+    const onReady = () => {
+      if (isMyTurn) setOpenScanner(true);
+    };
+    const onPreview = (evt: any) => {
+      const payload = evt?.payload as PreviewPayload;
+      if (payload?.error) {
+        setError(payload.error);
+        setWaiting(false);
+        setOpenScanner(true); // tekrar okutalım
+        setPreview(null);
+      } else if (payload?.effectId) {
+        setPreview(payload);
+        setWaiting(false);
+      }
+    };
+    const onAppliedPrivate = () => {
+      setPreview(null);
+      setWaiting(false);
+      setOpenScanner(false);
+      onCardDrawn();
+    };
+
+    wsClient.on("CARD_DRAW_READY", onReady);
+    wsClient.on("CARD_PREVIEW", onPreview);
+    wsClient.on("CARD_APPLIED_PRIVATE", onAppliedPrivate);
+
+    return () => {
+      wsClient.off("CARD_DRAW_READY", onReady);
+      wsClient.off("CARD_PREVIEW", onPreview);
+      wsClient.off("CARD_APPLIED_PRIVATE", onAppliedPrivate);
+    };
+  }, [isMyTurn, onCardDrawn]);
+
+  function handleOpen() {
+    setError(null);
+    setPreview(null);
+    setOpenScanner(true);
+  }
+
+  function handleDetected(token: string) {
+    setOpenScanner(false);
+    setWaiting(true);
+    setError(null);
+    setPreview(null);
+    // Gerçek QR → sunucuya yolla
+    wsClient.sendCardQrScanned(token);
+  }
+
+  function confirmCard() {
+    if (!preview?.effectId) return;
+    setWaiting(true);
+    wsClient.sendEvent("CARD_CONFIRM" as any, { effectId: preview.effectId });
   }
 
   return (
@@ -59,36 +109,51 @@ export function CardDrawingPhase({
               )}
             </div>
 
-            {isMyTurn && !scannedCard && (
+            {/* Sadece sıra sendeyse */}
+            {isMyTurn && !preview && !waiting && (
               <div className="space-y-4">
-                {!isScanning ? (
-                  <>
-                    <button
-                      onClick={handleQRScan}
-                      className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-4 px-8 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg"
-                    >
-                      📱 Kart Çek ve QR Okut
-                    </button>
-                    <p className="text-gray-400 text-sm">QR kodu okutmak için butona tıkla</p>
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="bg-black/50 border-2 border-cyan-400 rounded-lg p-8 animate-pulse">
-                      <div className="text-cyan-400 text-xl mb-2">📷 Kamera Açık</div>
-                      <div className="text-white">QR kodu kameraya gösterin...</div>
-                      <div className="mt-4 w-32 h-32 border-2 border-cyan-400 mx-auto rounded-lg flex items-center justify-center">
-                        <div className="animate-spin text-cyan-400 text-2xl">⟲</div>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <button
+                  onClick={handleOpen}
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold py-4 px-8 rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg"
+                >
+                  📱 QR Kodunu Oku
+                </button>
+                {error && <p className="text-red-400 text-sm">{error}</p>}
+                {!error && <p className="text-gray-400 text-sm">Kamerayı açıp QR’ı okut.</p>}
               </div>
             )}
 
-            {scannedCard && (
-              <div className="bg-green-600/20 border border-green-400 rounded-lg p-6">
-                <div className="text-green-400 text-xl">✅ {scannedCard}</div>
-                <div className="text-white mt-2">Kart başarıyla okundu!</div>
+            {waiting && (
+              <div className="bg-black/40 border border-purple-400 rounded-lg p-6 text-white">
+                ⏳ Sunucuya iletiliyor…
+              </div>
+            )}
+
+            {preview && !waiting && (
+              <div className="bg-slate-900/60 border border-emerald-400 rounded-lg p-6 text-left">
+                <div className="text-emerald-400 text-lg mb-1">✅ Kart bulundu</div>
+                <div className="text-white">
+                  <div className="font-semibold">Efekt: {preview.effectId}</div>
+                  {preview.text && <div className="opacity-80 mt-1">{preview.text}</div>}
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <button
+                    onClick={confirmCard}
+                    className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    Onayla
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPreview(null);
+                      setError(null);
+                      setOpenScanner(true);
+                    }}
+                    className="px-4 py-2 rounded bg-slate-600 hover:bg-slate-700 text-white"
+                  >
+                    Yeniden Oku
+                  </button>
+                </div>
               </div>
             )}
 
@@ -104,9 +169,9 @@ export function CardDrawingPhase({
 
         <div className="flex justify-center space-x-4">
           {selectedCardDrawers.map((playerId, index) => {
-            const player = players.find((p) => p.id === playerId)
-            const isCurrentDrawer = playerId === currentCardDrawer
-            const hasDrawn = selectedCardDrawers.indexOf(currentCardDrawer || "") > index
+            const player = players.find((p) => p.id === playerId);
+            const isCurrentDrawer = playerId === currentCardDrawer;
+            const hasDrawn = selectedCardDrawers.indexOf(currentCardDrawer || "") > index;
 
             return (
               <div
@@ -115,18 +180,20 @@ export function CardDrawingPhase({
                   isCurrentDrawer
                     ? "bg-purple-600 border-purple-400 text-white"
                     : hasDrawn
-                      ? "bg-green-600 border-green-400 text-white"
-                      : "bg-slate-700 border-slate-500 text-gray-300"
+                    ? "bg-green-600 border-green-400 text-white"
+                    : "bg-slate-700 border-slate-500 text-gray-300"
                 }`}
               >
                 {player?.name}
                 {hasDrawn && " ✓"}
                 {isCurrentDrawer && " 🎴"}
               </div>
-            )
+            );
           })}
         </div>
       </div>
+
+      {openScanner && <QrScanner open={openScanner} onDetected={handleDetected} onClose={() => setOpenScanner(false)} />}
     </div>
-  )
+  );
 }
