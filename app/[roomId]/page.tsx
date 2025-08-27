@@ -125,14 +125,14 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
     };
 
     // --- Kart çekme akışı: sadece sırası gelen oyuncuya özel mesajlar ---
-   /* const onCardDrawReady = () => {
+    const onCardDrawReady = () => {
       // Basit test akışı: prompt ile QR (token) iste
       const token = typeof window !== "undefined" ? window.prompt("QR kodunu okut / değeri gir:") : null;
       if (token && token.trim().length > 0) {
         wsClient.sendEvent("CARD_QR_SCANNED", { token: token.trim() });
       }
     };
-*/
+
     const onCardPreview = (data: any) => {
       const { text, effectId, error } = data?.payload || {};
       if (error) {
