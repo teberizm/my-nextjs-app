@@ -1415,6 +1415,77 @@ wss.on('connection', (ws) => {
         broadcast(room, 'RESET_GAME', { players: Array.from(room.players.values()) });
         break;
       }
+              case 'CARD_QR_SCANNED': {
+        const rid2 = roomId || ws.roomId;
+        const pid2 = playerId || ws.playerId;
+        const room = rooms.get(rid2);
+        const S = room?.state;
+        const token = payload?.token;
+
+        if (!room || !S || !pid2 || !token) break;
+        if (S.phase !== 'CARD_DRAWING' || S.currentCardDrawer !== pid2) {
+          // Sırası değilse sessizce yok say
+          break;
+        }
+
+        const effects = Array.isArray(QR_CARDS[token]) ? QR_CARDS[token] : [];
+        if (effects.length === 0) {
+          sendToPlayer(room, pid2, 'CARD_PREVIEW', { error: 'Geçersiz QR' });
+          break;
+        }
+
+        // Rastgele bir effectId seç
+        const picked = effects[Math.floor(Math.random() * effects.length)];
+        const effectId = picked?.effectId || picked?.id || picked; // güvenli fallback
+        const effectMeta = EFFECTS_CATALOG[effectId] || {};
+        const text = effectMeta?.title || picked?.text || String(effectId);
+
+        // Pending olarak kaydet
+        S.pendingCard = { playerId: pid2, token, effectId };
+
+        // Yalnız oyuncuya göster
+        sendToPlayer(room, pid2, 'CARD_PREVIEW', { effectId, text });
+        break;
+      }
+
+      case 'CARD_CONFIRM': {
+        const rid2 = roomId || ws.roomId;
+        const pid2 = playerId || ws.playerId;
+        const room = rooms.get(rid2);
+        const S = room?.state;
+        const effectId = payload?.effectId;
+
+        if (!room || !S || !pid2 || !effectId) break;
+        if (S.phase !== 'CARD_DRAWING' || S.currentCardDrawer !== pid2) break;
+
+        // Pending doğrulaması
+        const pc = S.pendingCard;
+        if (!pc || pc.playerId !== pid2 || pc.effectId !== effectId) {
+          sendToPlayer(room, pid2, 'CARD_PREVIEW', { error: 'Kart oturumu bulunamadı' });
+          break;
+        }
+
+        // Etkiyi uygula
+        const result = applyCardEffect(room, pid2, effectId, payload?.extra || {});
+        delete S.pendingCard;
+
+        // Oyuncuya özel sonuç
+        sendToPlayer(room, pid2, 'CARD_APPLIED_PRIVATE', { result });
+
+        // Tüm odaya snapshot
+        broadcastSnapshot(rid2);
+
+        // Fazı ilerlet (tek çekilişlik)
+        const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 };
+        if (result?.skipDay) {
+          // “Günü atla, geceye geç”
+          startPhase(rid2, 'NIGHT', settings.nightDuration);
+        } else {
+          startPhase(rid2, 'DAY_DISCUSSION', settings.dayDuration);
+        }
+        break;
+      }
+
 
       default:
         break;
