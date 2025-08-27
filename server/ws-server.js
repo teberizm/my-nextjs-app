@@ -586,7 +586,7 @@ function processNightActions(roomId) {
         actor &&
         (actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') &&
         a.targetId
-
+      );
     })
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
