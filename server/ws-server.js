@@ -671,10 +671,10 @@ function processNightActions(roomId) {
   // Bombs
   const bombPlacers = S.nightActions.filter(
     (a) => a.actionType === 'BOMB_PLANT' && !blockedPlayers.has(a.playerId),
-
+  );
   const detonateAction = S.nightActions.find(
     (a) => a.actionType === 'BOMB_DETONATE' && !blockedPlayers.has(a.playerId),
-
+  );
   let newBombTargets = [...S.bombTargets];
   bombPlacers.forEach((a) => {
     if (a.targetId && !newBombTargets.includes(a.targetId)) newBombTargets.push(a.targetId);
