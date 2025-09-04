@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Sun, Clock } from "lucide-react"
 import { PlayerStatus } from "./player-status"
 import type { Player } from "@/lib/types"
-
+import { wsClient } from "@/lib/websocket-client"
 interface DayPhaseProps {
   currentPlayer: Player
   allPlayers: Player[]
@@ -24,6 +24,18 @@ export function DayPhase({
   deaths,
 }: DayPhaseProps) {
   const notes = playerNotes[currentPlayer.id] || []
+
+  const [progress, setProgress] = useState<{ votes: number; total: number }>({ votes: 0, total: 0 })
+
+  useEffect(() => {
+    const handler = (msg: any) => {
+      if (msg.type === "DISCUSSION_END_PROGRESS") {
+        setProgress(msg.payload)
+      }
+    }
+    wsClient.subscribe(handler)
+    return () => wsClient.unsubscribe(handler)
+  }, [])
 
   return (
     <div className="min-h-screen bg-background p-4">
@@ -83,17 +95,35 @@ export function DayPhase({
         {/* Player Status */}
         <PlayerStatus players={allPlayers} currentPlayer={currentPlayer} showRoles={false} />
 
-        {/* Phase Info */}
+        {/* Phase Info + New Buttons */}
         <Card className="bg-muted/10 border-muted/30">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <CardContent className="space-y-3 pt-6 text-center">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground justify-center">
               <Clock className="w-4 h-4" />
               <span>Tartışma sonrası oylama başlayacak</span>
             </div>
+
+            <Button
+              onClick={() => wsClient.sendEvent("REQUEST_END_DISCUSSION" as any, {})}
+              className="w-full bg-primary hover:bg-primary/90"
+            >
+              Tartışmayı Bitir
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              Oy vermeye geçmek için {progress.votes}/{progress.total} oyuncu onayladı
+            </p>
+
+            {currentPlayer.isOwner && (
+              <Button
+                onClick={() => wsClient.sendEvent("OWNER_START_VOTE_NOW" as any, {})}
+                className="w-full bg-destructive hover:bg-destructive/90"
+              >
+                Hemen Oylamaya Geç (Yönetici)
+              </Button>
+            )}
           </CardContent>
         </Card>
       </div>
-
     </div>
   )
 }
