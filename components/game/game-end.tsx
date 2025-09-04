@@ -25,6 +25,10 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
       ? Math.max(0, Math.round((endedAtDate.getTime() - startedAtDate.getTime()) / 60000))
       : 0
 
+  // LOVERS desteği: server GAME_ENDED ile loversPairs gönderebilir
+  const loversPairs = (game as any)?.loversPairs as [string, string][] | undefined
+  const loversSet = new Set<string>((loversPairs ?? []).flatMap(([a, b]) => [a, b]))
+
   const getWinnerInfo = () => {
     switch (game.winningSide) {
       case "INNOCENTS":
@@ -51,7 +55,16 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
           bgColor: "bg-orange-400/20",
           icon: "💣",
         }
-      default:
+      
+      case "LOVERS":
+        return {
+          title: "Âşıklar Kazandı!",
+          description: "Son 3’te iki âşık birlikte hayatta kaldı",
+          color: "text-pink-400",
+          bgColor: "bg-pink-400/20",
+          icon: "💞",
+        }
+default:
         return {
           title: "Oyun Bitti",
           description: "Sonuç belirsiz",
@@ -72,6 +85,8 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
         return isTraitorRole(currentPlayer.role)
       case "BOMBER":
         return currentPlayer.role === "BOMBER"
+      case "LOVERS":
+        return loversSet.has(currentPlayer.id)
       default:
         return false
     }
@@ -94,6 +109,8 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
         return isTraitorRole(player.role)
       case "BOMBER":
         return player.role === "BOMBER"
+      case "LOVERS":
+        return loversSet.has(player.id)
       default:
         return false
     }
