@@ -28,7 +28,7 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 3 */ HINT_PARTIAL_ROLE: {
     title: "İpucu",
-    desc: "Rastgele bir oyuncunun rolüne dair kısmen doğru/yanlış bir ipucu notlarına düşer (sadece çeken görür).",
+    desc: "Rastgele bir oyuncunun rolüne dair bir ipucu notlarına düşer.",
     timing: "IMMEDIATE",
   },
 
@@ -46,13 +46,13 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 6 */ MASS_NOTE_FAKE_INNOCENT: {
     title: "Toplu Not",
-    desc: "Rastgele MASUM birinin notlarına sahte bir bilgi düşülür.",
+    desc: "Rastgele MASUM birinin notlarına bir bilgi düşülür.",
     timing: "IMMEDIATE",
   },
 
   /* 7 */ RUMOR_SUSPECT_NOTE: {
     title: "Dedikodu",
-    desc: "Rastgele bir oyuncu hakkında 'hain olabilir' dedikodusu notlara eklenir.",
+    desc: "Rastgele bir oyuncu hakkında dedikodu notlara eklenir.",
     timing: "IMMEDIATE",
   },
 
@@ -65,7 +65,7 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 9 */ REVEAL_TRUE_ROLE_TO_ACTOR: {
     title: "Rol Açığa Çıktı",
-    desc: "Çeken oyuncu, rastgele bir oyuncunun GERÇEK rolünü öğrenir (özel not).",
+    desc: "Çeken oyuncu, rastgele bir oyuncunun GERÇEK rolünü öğrenir.",
     timing: "IMMEDIATE",
   },
 
@@ -95,13 +95,13 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 14 */ PUBLIC_ROLE_HINT: {
     title: "Sır Açığa Çıktı",
-    desc: "Rastgele bir rol bilgisi tüm oyuncuların notlarına düşer (kime ait olduğu yazılmaz).",
+    desc: "Rastgele bir rol bilgisi tüm oyuncuların notlarına düşer.",
     timing: "IMMEDIATE",
   },
 
   /* 15 */ SECRET_MESSAGE_TO_RANDOM: {
     title: "Gizli Mesaj",
-    desc: "Rastgele bir CANLI oyuncunun notlarına gizli bir mesaj bırakılır (çeken tarafından görülür).",
+    desc: "Rastgele bir CANLI oyuncunun notlarına gizli bir mesaj bırakılır.",
     timing: "IMMEDIATE",
   },
 
@@ -125,7 +125,7 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 19 */ SKIP_DAY_START_NIGHT: {
     title: "Gündüzü Atlama",
-    desc: "Gündüz fazı atlanır, karttan sonra doğrudan gece başlar (hain avantajı).",
+    desc: "Gündüz fazı atlanır, karttan sonra doğrudan gece başlar.",
     timing: "TODAY",
   },
 
@@ -155,7 +155,7 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 24 */ FALSE_HINT_TO_ACTOR: {
     title: "Bulanık İpucu",
-    desc: "Çekene verilen ipucu %100 YANLIŞ olur (bilerek saptırır).",
+    desc: "Çeken oyuncuya bir ipucu verilir lakin gerçeği kim bilebilir?",
     timing: "IMMEDIATE",
   },
 
@@ -167,13 +167,13 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 26 */ TRUST_NOTE_PUBLIC_INNOCENT: {
     title: "Güven Kartı",
-    desc: "Rastgele bir oyuncunun rolü herkesin notlarına 'Masum' olarak düşer (doğru olmayabilir).",
+    desc: "Rastgele bir oyuncunun rolü herkesin notlarına 'Masum' olarak düşer.",
     timing: "IMMEDIATE",
   },
 
   /* 27 */ DIE_AND_TAKE_ONE: {
     title: "Son Şans",
-    desc: "Kartı çeken anında ölür ama yanında götürmek için bir oyuncu seçebilir (UI yoksa rastgele seçilir).",
+    desc: "Kartı çeken anında ölür ama yanında götürmek için bir oyuncu seçebilir.",
     timing: "IMMEDIATE",
   },
 
