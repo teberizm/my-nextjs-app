@@ -3,8 +3,8 @@ import type { Metadata } from "next"
 import "./globals.css"
 
 export const metadata: Metadata = {
-  title: "HoloDeck - QR Social Deduction Game",
-  description: "A futuristic QR-based social deduction game combining physical cards with digital gameplay",
+  title: "Tebova - Gerçeğin değiştiği oyun.",
+  description: "Klasik vampir-köylü oyununa yeni bir soluk... Çeşitli roller ve ilginç olaylar seni bekliyor.",
   generator: "v0.app",
 }
 
