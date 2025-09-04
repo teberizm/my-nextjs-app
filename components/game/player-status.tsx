@@ -13,45 +13,59 @@ interface PlayerStatusProps {
   showRoles?: boolean
 }
 
-/** Kartın etrafına küçük kalplerden oluşan dekoratif çerçeve */
+/** Özel isim kontrolü (trim/lower, alternatif alanlar) */
+function isSpecialName(p: any) {
+  const candidates = [p?.name, p?.username, p?.displayName, p?.nick]
+    .map((v) => (v ?? "").toString().trim().toLowerCase())
+  return candidates.includes("boylu1907")
+}
+
+/** DOLU kalp çerçevesi – daha büyük, daha parlak */
 function HeartBorder() {
   const top = Array.from({ length: 12 }, (_, i) => i)
   const bottom = top
   const left = Array.from({ length: 8 }, (_, i) => i)
   const right = left
 
+  const cls =
+    "absolute w-5 h-5 text-yellow-300 drop-shadow-[0_0_6px_rgba(255,230,0,0.85)]"
+
   return (
     <div className="pointer-events-none absolute inset-0">
-      {/* üst */}
       {top.map((i) => (
         <Heart
           key={`t-${i}`}
-          className="absolute w-3 h-3 text-pink-500 drop-shadow"
-          style={{ top: -6, left: `${(i + 0.5) * (100 / 12)}%`, transform: "translateX(-50%)" }}
+          className={cls}
+          style={{ top: -10, left: `${(i + 0.5) * (100 / 12)}%`, transform: "translateX(-50%)" }}
+          fill="currentColor"
+          stroke="none"
         />
       ))}
-      {/* alt */}
       {bottom.map((i) => (
         <Heart
           key={`b-${i}`}
-          className="absolute w-3 h-3 text-pink-500 drop-shadow"
-          style={{ bottom: -6, left: `${(i + 0.5) * (100 / 12)}%`, transform: "translateX(-50%)" }}
+          className={cls}
+          style={{ bottom: -10, left: `${(i + 0.5) * (100 / 12)}%`, transform: "translateX(-50%)" }}
+          fill="currentColor"
+          stroke="none"
         />
       ))}
-      {/* sol */}
       {left.map((i) => (
         <Heart
           key={`l-${i}`}
-          className="absolute w-3 h-3 text-pink-500 drop-shadow"
-          style={{ left: -6, top: `${(i + 0.5) * (100 / 8)}%`, transform: "translateY(-50%)" }}
+          className={cls}
+          style={{ left: -10, top: `${(i + 0.5) * (100 / 8)}%`, transform: "translateY(-50%)" }}
+          fill="currentColor"
+          stroke="none"
         />
       ))}
-      {/* sağ */}
       {right.map((i) => (
         <Heart
           key={`r-${i}`}
-          className="absolute w-3 h-3 text-pink-500 drop-shadow"
-          style={{ right: -6, top: `${(i + 0.5) * (100 / 8)}%`, transform: "translateY(-50%)" }}
+          className={cls}
+          style={{ right: -10, top: `${(i + 0.5) * (100 / 8)}%`, transform: "translateY(-50%)" }}
+          fill="currentColor"
+          stroke="none"
         />
       ))}
     </div>
@@ -59,14 +73,8 @@ function HeartBorder() {
 }
 
 export function PlayerStatus({ players, currentPlayer, showRoles = false }: PlayerStatusProps) {
-  const getPlayerInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2)
-  }
+  const getPlayerInitials = (name: string) =>
+    name.split(" ").map((n) => n[0]).join("").toUpperCase().slice(0, 2)
 
   const getPlayerStatusColor = (player: Player) => {
     if (!player.isAlive) return "border-gray-500"
@@ -89,15 +97,13 @@ export function PlayerStatus({ players, currentPlayer, showRoles = false }: Play
           {players.map((player) => {
             const roleInfo = player.role ? getRoleInfo(player.role) : null
             const isCurrentPlayer = player.id === currentPlayer.id
-
-            // 🔹 Özel kullanıcı adı (case-insensitive)
-            const isSpecial = (player.name || "").toLowerCase() === "boylu1907"
+            const isSpecial = isSpecialName(player)
 
             return (
               <div
                 key={player.id}
                 className={[
-                  "relative overflow-hidden p-3 rounded-lg border transition-all",
+                  "relative overflow-visible p-3 rounded-lg border transition-all",
                   isCurrentPlayer ? "ring-2 ring-primary/50" : "",
                   isSpecial ? "bg-[#001a4d] ring-2 ring-yellow-400/60" : getPlayerStatusColor(player),
                 ].join(" ")}
@@ -117,18 +123,15 @@ export function PlayerStatus({ players, currentPlayer, showRoles = false }: Play
                         isSpecial ? "bg-[#0a2a6b] text-yellow-300" : getPlayerBgColor(player),
                       ].join(" ")}
                     >
-                      {getPlayerInitials(player.name)}
+                      {getPlayerInitials(
+                        (player.name ?? player.username ?? player.displayName ?? player.nick ?? "").toString()
+                      )}
                     </AvatarFallback>
                   </Avatar>
 
                   <div className="flex-1 min-w-0">
-                    <div
-                      className={[
-                        "text-sm font-medium truncate",
-                        isSpecial ? "text-yellow-300" : "",
-                      ].join(" ")}
-                    >
-                      {player.name}
+                    <div className={["text-sm font-medium truncate", isSpecial ? "text-yellow-300" : ""].join(" ")}>
+                      {(player.name ?? player.username ?? player.displayName ?? player.nick ?? "").toString()}
                     </div>
 
                     <div className="flex items-center gap-1">
