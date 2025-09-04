@@ -29,6 +29,7 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
   const loversPairs = (game as any)?.loversPairs as [string, string][] | undefined
   const loversSet = new Set<string>((loversPairs ?? []).flatMap(([a, b]) => [String(a), String(b)]))
 
+  
   const getWinnerInfo = () => {
     switch (game.winningSide) {
       case "INNOCENTS":
@@ -55,7 +56,6 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
           bgColor: "bg-orange-400/20",
           icon: "💣",
         }
-      
       case "LOVERS":
         return {
           title: "Âşıklar Kazandı!",
@@ -64,7 +64,7 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
           bgColor: "bg-pink-400/20",
           icon: "💞",
         }
-default:
+      default:
         return {
           title: "Oyun Bitti",
           description: "Sonuç belirsiz",
