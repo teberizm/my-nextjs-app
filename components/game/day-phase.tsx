@@ -28,14 +28,14 @@ export function DayPhase({
   const [progress, setProgress] = useState<{ votes: number; total: number }>({ votes: 0, total: 0 })
 
   useEffect(() => {
-    const handler = (msg: any) => {
-      if (msg.type === "DISCUSSION_END_PROGRESS") {
-        setProgress(msg.payload)
-      }
+  const handler = (msg: any) => {
+    if (msg.type === "DISCUSSION_END_PROGRESS") {
+      setProgress(msg.payload)
     }
-    wsClient.subscribe(handler)
-    return () => wsClient.unsubscribe(handler)
-  }, [])
+  }
+  wsClient.on("DISCUSSION_END_PROGRESS", handler)
+  return () => wsClient.off("DISCUSSION_END_PROGRESS", handler)
+}, [])
 
   return (
     <div className="min-h-screen bg-background p-4">
