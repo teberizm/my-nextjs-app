@@ -3,7 +3,9 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 
-const app = 
+// Initialize express app FIRST (the earlier snippet had `const app =` left unfinished)
+const app = express();
+
 // ---- Role display (TR) ----
 const ROLE_TR = {
   DOCTOR: 'Doktor',
@@ -18,7 +20,7 @@ const ROLE_TR = {
   DELI: 'Deli',
 };
 const roleTR = (code) => ROLE_TR[code] || code;
-express();
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -1146,8 +1148,6 @@ wss.on('connection', (ws) => {
               deathLog: [],
               bombTargets: [],
               playerNotes: {},
-          roleRevealReady: [],
-          discussionEndVoters: [],
               roleRevealReady: [],
               discussionEndVoters: [],
               game: null,
@@ -1420,7 +1420,6 @@ wss.on('connection', (ws) => {
       }
       /* -------------------------------------- */
 
-      
       case 'PLAYER_READY': {
         const room = rooms.get(rid);
         if (!room) break;
@@ -1473,7 +1472,8 @@ wss.on('connection', (ws) => {
         startPhase(rid, 'VOTE', room.settings.voteDuration || 45);
         break;
       }
-case 'RESET_GAME': {
+
+      case 'RESET_GAME': {
         if (!rid) break;
         const room = rooms.get(rid);
         if (!room) break;
@@ -1487,8 +1487,8 @@ case 'RESET_GAME': {
           deathLog: [],
           bombTargets: [],
           playerNotes: {},
-              roleRevealReady: [],
-              discussionEndVoters: [],
+          roleRevealReady: [],
+          discussionEndVoters: [],
           game: null,
           phaseEndsAt: 0,
           selectedCardDrawers: [],
