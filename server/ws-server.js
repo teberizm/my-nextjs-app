@@ -1008,6 +1008,7 @@ function advancePhase(roomId) {
   const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()), (room.state && room.state.loversPairs) || []);
   if (gameEnded && S.phase !== 'END') {
     S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner };
+        broadcast(room, 'GAME_ENDED', { winner, loversPairs: S.loversPairs || [], turn: S.currentTurn });
     startPhase(roomId, 'END', 0);
     return;
   }
