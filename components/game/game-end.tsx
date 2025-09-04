@@ -29,7 +29,6 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
   const loversPairs = (game as any)?.loversPairs as [string, string][] | undefined
   const loversSet = new Set<string>((loversPairs ?? []).flatMap(([a, b]) => [String(a), String(b)]))
 
-  
   const getWinnerInfo = () => {
     switch (game.winningSide) {
       case "INNOCENTS":
@@ -76,6 +75,7 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
   }
 
   const winnerInfo = getWinnerInfo()
+
   const isWinner = () => {
     if (!currentPlayer.role) return false
     switch (game.winningSide) {
@@ -155,11 +155,11 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
                 return (
                   <div
                     key={player.id}
-                    className={`flex items-center justify-between p-3 rounded-lg ${game.winningSide==="LOVERS" ? "bg-pink-400/10 border border-pink-400/30" : "bg-green-400/10 border border-green-400/30"}`
+                    className={`flex items-center justify-between p-3 rounded-lg ${game.winningSide==="LOVERS" ? "bg-pink-400/10 border border-pink-400/30" : "bg-green-400/10 border border-green-400/30"}`}
                   >
                     <div className="flex items-center gap-3">
-                      <Avatar className={`w-10 h-10 border-2 ${game.winningSide==="LOVERS" ? "border-pink-400/50" : "border-green-400/50"}`>
-                        <AvatarFallback className={`font-semibold ${game.winningSide==="LOVERS" ? "bg-pink-400/20 text-pink-400" : "bg-green-400/20 text-green-400"}`>
+                      <Avatar className={`w-10 h-10 border-2 ${game.winningSide==="LOVERS" ? "border-pink-400/50" : "border-green-400/50"}`}>
+                        <AvatarFallback className={`font-semibold ${game.winningSide==="LOVERS" ? "bg-pink-400/20 text-pink-400" : "bg-green-400/20 text-green-400"}`}>
                           {getPlayerInitials(player.name)}
                         </AvatarFallback>
                       </Avatar>
@@ -174,12 +174,15 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
                   </div>
                 )
               })}
+              {winners.length === 0 && (
+                <div className="text-muted-foreground text-sm">Kazanan bulunamadı.</div>
+              )}
             </div>
           </CardContent>
         </Card>
 
         {/* All Players with Roles */}
-        <Card className={`neon-border bg-card/50 backdrop-blur-sm ${game.winningSide==="LOVERS" ? "ring-1 ring-pink-400/40" : ""}`}>
+        <Card className="neon-border bg-card/50 backdrop-blur-sm">
           <CardHeader>
             <CardTitle className="font-work-sans">Tüm Roller</CardTitle>
           </CardHeader>
