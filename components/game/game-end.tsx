@@ -27,7 +27,7 @@ export function GameEnd({ game, players, currentPlayer, onPlayAgain, onBackToLob
 
   // LOVERS desteği: server GAME_ENDED ile loversPairs gönderebilir
   const loversPairs = (game as any)?.loversPairs as [string, string][] | undefined
-  const loversSet = new Set<string>((loversPairs ?? []).flatMap(([a, b]) => [a, b]))
+  const loversSet = new Set<string>((loversPairs ?? []).flatMap(([a, b]) => [String(a), String(b)]))
 
   const getWinnerInfo = () => {
     switch (game.winningSide) {
@@ -86,7 +86,7 @@ default:
       case "BOMBER":
         return currentPlayer.role === "BOMBER"
       case "LOVERS":
-        return loversSet.has(currentPlayer.id)
+        return loversSet.has(String(currentPlayer.id))
       default:
         return false
     }
@@ -110,7 +110,7 @@ default:
       case "BOMBER":
         return player.role === "BOMBER"
       case "LOVERS":
-        return loversSet.has(player.id)
+        return loversSet.has(String(player.id))
       default:
         return false
     }
@@ -141,7 +141,7 @@ default:
         </Card>
 
         {/* Winners List */}
-        <Card className="neon-border bg-card/50 backdrop-blur-sm">
+        <Card className={`neon-border bg-card/50 backdrop-blur-sm ${game.winningSide==="LOVERS" ? "ring-1 ring-pink-400/40" : ""}`}>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 font-work-sans">
               <Crown className="w-5 h-5 text-accent" />
@@ -155,11 +155,11 @@ default:
                 return (
                   <div
                     key={player.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-green-400/10 border border-green-400/30"
+                    className={`flex items-center justify-between p-3 rounded-lg ${game.winningSide==="LOVERS" ? "bg-pink-400/10 border border-pink-400/30" : "bg-green-400/10 border border-green-400/30"}`
                   >
                     <div className="flex items-center gap-3">
-                      <Avatar className="w-10 h-10 border-2 border-green-400/50">
-                        <AvatarFallback className="bg-green-400/20 text-green-400 font-semibold">
+                      <Avatar className={`w-10 h-10 border-2 ${game.winningSide==="LOVERS" ? "border-pink-400/50" : "border-green-400/50"}`>
+                        <AvatarFallback className={`font-semibold ${game.winningSide==="LOVERS" ? "bg-pink-400/20 text-pink-400" : "bg-green-400/20 text-green-400"}`>
                           {getPlayerInitials(player.name)}
                         </AvatarFallback>
                       </Avatar>
@@ -170,7 +170,7 @@ default:
                         </Badge>
                       </div>
                     </div>
-                    <Trophy className="w-5 h-5 text-green-400" />
+                    <Trophy className={`w-5 h-5 ${game.winningSide==="LOVERS" ? "text-pink-400" : "text-green-400"}`} />
                   </div>
                 )
               })}
@@ -179,7 +179,7 @@ default:
         </Card>
 
         {/* All Players with Roles */}
-        <Card className="neon-border bg-card/50 backdrop-blur-sm">
+        <Card className={`neon-border bg-card/50 backdrop-blur-sm ${game.winningSide==="LOVERS" ? "ring-1 ring-pink-400/40" : ""}`}>
           <CardHeader>
             <CardTitle className="font-work-sans">Tüm Roller</CardTitle>
           </CardHeader>
