@@ -22,14 +22,14 @@ export function RoleReveal({ player }: RoleRevealProps) {
   })
 
   useEffect(() => {
-    const handler = (msg: any) => {
-      if (msg.type === "ROLE_REVEAL_READY_UPDATED") {
-        setReadyProgress(msg.payload)
-      }
+  const handler = (msg: any) => {
+    if (msg.type === "ROLE_REVEAL_READY_UPDATED") {
+      setReadyProgress(msg.payload)
     }
-    wsClient.subscribe(handler)
-    return () => wsClient.unsubscribe(handler)
-  }, [])
+  }
+  wsClient.on("ROLE_REVEAL_READY_UPDATED", handler)
+  return () => wsClient.off("ROLE_REVEAL_READY_UPDATED", handler)
+}, [])
 
   // Henüz rol yoksa loading ekranı
   const rawRole: PlayerRole | undefined =
