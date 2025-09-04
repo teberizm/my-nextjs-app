@@ -3,7 +3,22 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 
-const app = express();
+const app = 
+// ---- Role display (TR) ----
+const ROLE_TR = {
+  DOCTOR: 'Doktor',
+  GUARDIAN: 'Gardiyan',
+  WATCHER: 'Gözcü',
+  DETECTIVE: 'Dedektif',
+  BOMBER: 'Bombacı',
+  SURVIVOR: 'Survivor',
+  EVIL_GUARDIAN: 'Hain gardiyan',
+  EVIL_WATCHER: 'Hain gözcü',
+  EVIL_DETECTIVE: 'Hain dedektif',
+  DELI: 'Deli',
+};
+const roleTR = (code) => ROLE_TR[code] || code;
+express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -317,13 +332,13 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
     }
 
     /* 18 */ case 'AUTO_CONFESS_ROLE': {
-      if (actor) addNote(actorId, `${S.currentTurn}. Gün: GERÇEK rolün: ${actor.role}`);
+      if (actor) addNote(actorId, `${S.currentTurn}. Gün: GERÇEK rolün: ${roleTR(actor.role)}`);
       return { ok:true, title, desc };
     }
 
     /* 14 */ case 'PUBLIC_ROLE_HINT': {
       const roles = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
-      const hint = 'Bir oyuncunun rolü şuna benziyor: ' + randPick(roles);
+      const hint = 'Bir oyuncunun rolü şuna benziyor: ' + roleTR(randPick(roles));
       Array.from(room.players.keys()).forEach(pid => addNote(pid, `${S.currentTurn}. Gün: ${hint}`));
       return { ok:true, title, desc };
     }
@@ -372,7 +387,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const roles = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
       let fake = randPick(roles);
       if (fake === t.role) fake = roles[(roles.indexOf(fake)+1)%roles.length];
-      S.playerNotes[actorId] = [...(S.playerNotes[actorId] || []), `${S.currentTurn}. Gün: YANLIŞ ipucu → ${t.name} aslında ${fake}`];
+      S.playerNotes[actorId] = [...(S.playerNotes[actorId] || []), `${S.currentTurn}. Gün: YANLIŞ ipucu → ${t.name} aslında ${roleTR(fake)}`];
       return { ok:true, targetId:t.id, title, desc };
     }
 
@@ -380,7 +395,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const alive = alivePlayers().filter(p=>p.id!==actorId);
       if (!alive.length) return { ok:false, note:'Canlı yok' };
       const t = randPick(alive);
-      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} GERÇEK rolü: ${t.role}`);
+      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} GERÇEK rolü: ${roleTR(t.role)}`);
       return { ok:true, targetId:t.id, title, desc };
     }
 
@@ -423,7 +438,11 @@ function broadcast(room, type, payload = {}) {
 function snapshotRoom(roomId) {
   const room = rooms.get(roomId);
   if (!room) return null;
-  const players = Array.from(room.players.values());
+  const players = Array.from(room.players.values()).map((p) => {
+    const copy = { ...p };
+    if ('hasShield' in copy) delete copy.hasShield;
+    return copy;
+  });
   const state = { ...room.state, players };
   return toPlain(state);
 }
@@ -533,6 +552,12 @@ function startPhase(roomId, phase, durationSec) {
     room.state.votes = {};
   }
 
+  if (phase === 'ROLE_REVEAL') {
+    room.state.roleRevealReady = [];
+  }
+  if (phase === 'DAY_DISCUSSION') {
+    room.state.discussionEndVoters = [];
+  }
   room.state.phase = phase;
   room.state.phaseEndsAt = now() + Math.max(0, durationSec) * 1000;
 
@@ -756,7 +781,7 @@ function processNightActions(roomId) {
         note = `${prefix} ${target.name} oyuncusunu izledin: ${vt}`;
       } else if (result.type === 'DETECT' && target) {
         const [r1, r2] = result.roles || [];
-        note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${r1}, ${r2}`;
+        note = `${prefix} ${target.name} oyuncusunu soruşturdun: ${roleTR(r1)}, ${roleTR(r2)}`;
       } else if (result.type === 'BOMB_PLANT' && target) {
         note = `${prefix} ${target.name} oyuncusuna bomba yerleştirdin`;
       }
@@ -1032,7 +1057,7 @@ function advancePhase(roomId) {
 
   switch (S.phase) {
     case 'ROLE_REVEAL':
-      startPhase(roomId, 'NIGHT', settings.nightDuration);
+      // no auto-advance; wait for all players to send PLAYER_READY
       break;
     case 'NIGHT':
       processNightActions(roomId);
@@ -1121,6 +1146,10 @@ wss.on('connection', (ws) => {
               deathLog: [],
               bombTargets: [],
               playerNotes: {},
+          roleRevealReady: [],
+          discussionEndVoters: [],
+              roleRevealReady: [],
+              discussionEndVoters: [],
               game: null,
               phaseEndsAt: 0,
               // cards
@@ -1235,7 +1264,10 @@ wss.on('connection', (ws) => {
         room.state.resurrectionStone = null;
         room.state.pendingCard = null;
 
-        startPhase(rid, 'ROLE_REVEAL', 10);
+        room.state.roleRevealReady = [];
+        room.state.playerNotes = {};
+        Array.from(room.players.keys()).forEach(pid => { room.state.playerNotes[pid] = []; });
+        startPhase(rid, 'ROLE_REVEAL', 0);
 
         broadcast(room, 'GAME_STARTED', { players: toPlain(startPlayers), settings: room.settings });
         break;
@@ -1388,7 +1420,60 @@ wss.on('connection', (ws) => {
       }
       /* -------------------------------------- */
 
-      case 'RESET_GAME': {
+      
+      case 'PLAYER_READY': {
+        const room = rooms.get(rid);
+        if (!room) break;
+        const S = room.state;
+        if (S.phase !== 'ROLE_REVEAL') break;
+        const voterId = ws.playerId;
+        const p = room.players.get(voterId);
+        if (!p || !p.isAlive) break;
+        if (!S.roleRevealReady.includes(voterId)) {
+          S.roleRevealReady.push(voterId);
+        }
+        const aliveIds = Array.from(room.players.values()).filter(pl => pl.isAlive).map(pl => pl.id);
+        const readyCount = S.roleRevealReady.filter(id => aliveIds.includes(id)).length;
+        broadcast(room, 'ROLE_REVEAL_READY_UPDATED', { ready: readyCount, total: aliveIds.length });
+        if (readyCount >= aliveIds.length) {
+          clearTimer(room);
+          startPhase(rid, 'NIGHT', room.settings.nightDuration || 60);
+        }
+        break;
+      }
+
+      case 'REQUEST_END_DISCUSSION': {
+        const room = rooms.get(rid);
+        if (!room) break;
+        const S = room.state;
+        if (S.phase !== 'DAY_DISCUSSION') break;
+        const voterId = ws.playerId;
+        const p = room.players.get(voterId);
+        if (!p || !p.isAlive) break;
+        if (!S.discussionEndVoters.includes(voterId)) {
+          S.discussionEndVoters.push(voterId);
+        }
+        const aliveIds = Array.from(room.players.values()).filter(pl => pl.isAlive).map(pl => pl.id);
+        const voteCount = S.discussionEndVoters.filter(id => aliveIds.includes(id)).length;
+        broadcast(room, 'DISCUSSION_END_PROGRESS', { votes: voteCount, total: aliveIds.length });
+        if (voteCount >= aliveIds.length) {
+          clearTimer(room);
+          startPhase(rid, 'VOTE', room.settings.voteDuration || 45);
+        }
+        break;
+      }
+
+      case 'OWNER_START_VOTE_NOW': {
+        const room = rooms.get(rid);
+        if (!room) break;
+        const S = room.state;
+        if (S.phase !== 'DAY_DISCUSSION') break;
+        if (ws.playerId !== room.ownerId) break;
+        clearTimer(room);
+        startPhase(rid, 'VOTE', room.settings.voteDuration || 45);
+        break;
+      }
+case 'RESET_GAME': {
         if (!rid) break;
         const room = rooms.get(rid);
         if (!room) break;
@@ -1402,6 +1487,8 @@ wss.on('connection', (ws) => {
           deathLog: [],
           bombTargets: [],
           playerNotes: {},
+              roleRevealReady: [],
+              discussionEndVoters: [],
           game: null,
           phaseEndsAt: 0,
           selectedCardDrawers: [],
