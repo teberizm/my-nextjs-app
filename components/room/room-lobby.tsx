@@ -213,35 +213,9 @@ export function RoomLobby({
             </CardDescription>
           </CardHeader>
           <CardContent className="flex items-center gap-2">
-            <Button onClick={copyRoomCode} variant="secondary" size="sm">
-              <Copy className="w-4 h-4 mr-2" />
-              {copiedCode ? "Kopyalandı!" : "Kodu Kopyala"}
-            </Button>
-            <Button onClick={() => setShowQR(true)} variant="secondary" size="sm">
-              <QrCode className="w-4 h-4 mr-2" />
-              QR
-            </Button>
-            <Button onClick={shareRoom} variant="secondary" size="sm">
-              <Share2 className="w-4 h-4 mr-2" />
-              Paylaş
-            </Button>
+           
             <div className="ml-auto flex items-center gap-2">
-              <Button
-                onClick={onToggleLock}
-                variant={room.isLocked ? "destructive" : "outline"}
-                size="sm"
-                title={room.isLocked ? "Odayı aç" : "Odayı kilitle"}
-              >
-                {room.isLocked ? (
-                  <>
-                    <Unlock className="w-4 h-4 mr-2" /> Aç
-                  </>
-                ) : (
-                  <>
-                    <Lock className="w-4 h-4 mr-2" /> Kilitle
-                  </>
-                )}
-              </Button>
+               
               {currentPlayer.isOwner && (
                 <Button
                   onClick={() => setShowSettings(true)}
