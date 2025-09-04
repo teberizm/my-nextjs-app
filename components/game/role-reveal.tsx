@@ -7,31 +7,33 @@ import { Badge } from "@/components/ui/badge"
 import { Eye, EyeOff } from "lucide-react"
 import { getRoleInfo } from "@/lib/game-logic"
 import type { Player, PlayerRole } from "@/lib/types"
-
+import { wsClient } from "@/lib/websocket-client"
 interface RoleRevealProps {
   player: Player
   onContinue: () => void
 }
 
-export function RoleReveal({ player, onContinue }: RoleRevealProps) {
+export function RoleReveal({ player }: RoleRevealProps) {
   const [isRevealed, setIsRevealed] = useState(false)
-  const [timeLeft, setTimeLeft] = useState(10)
-
-  // Rol henüz set edilmemiş olabilir → guard
-  const rawRole: PlayerRole | undefined =
-    (player?.displayRole as PlayerRole | undefined) ?? (player?.role as PlayerRole | undefined)
+  const [isReady, setIsReady] = useState(false)
+  const [readyProgress, setReadyProgress] = useState<{ ready: number; total: number }>({
+    ready: 0,
+    total: 0,
+  })
 
   useEffect(() => {
-    if (!isRevealed) return
-    if (timeLeft <= 0) {
-      onContinue()
-      return
+    const handler = (msg: any) => {
+      if (msg.type === "ROLE_REVEAL_READY_UPDATED") {
+        setReadyProgress(msg.payload)
+      }
     }
-    const t = setTimeout(() => setTimeLeft((s) => s - 1), 1000)
-    return () => clearTimeout(t)
-  }, [isRevealed, timeLeft, onContinue])
+    wsClient.subscribe(handler)
+    return () => wsClient.unsubscribe(handler)
+  }, [])
 
-  // Henüz rol yoksa “hazırlanıyor” ekranı
+  // Henüz rol yoksa loading ekranı
+  const rawRole: PlayerRole | undefined =
+    (player?.displayRole as PlayerRole | undefined) ?? (player?.role as PlayerRole | undefined)
   if (!rawRole) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -48,9 +50,9 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
     )
   }
 
-  // Artık güvenli: getRoleInfo her zaman default ile döner
   const roleInfo = getRoleInfo(rawRole)
 
+  // Rolü henüz göstermedi
   if (!isRevealed) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -59,7 +61,7 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
             <CardTitle className="font-work-sans text-2xl">Rolün Hazır</CardTitle>
             <CardDescription>Rolünü görmek için butona bas. Sadece sen görebilirsin!</CardDescription>
           </CardHeader>
-        <CardContent className="text-center space-y-6">
+          <CardContent className="text-center space-y-6">
             <div className="w-24 h-24 bg-primary/20 rounded-full flex items-center justify-center mx-auto holographic-glow">
               <EyeOff className="w-12 h-12 text-primary" />
             </div>
@@ -77,39 +79,46 @@ export function RoleReveal({ player, onContinue }: RoleRevealProps) {
     )
   }
 
-  return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className={`max-w-md w-full neon-border backdrop-blur-sm ${roleInfo.bgColor}`}>
-        <CardHeader className="text-center">
-          <div className="text-6xl mb-4">{roleInfo.icon}</div>
-          <CardTitle className={`font-work-sans text-3xl ${roleInfo.color}`}>{roleInfo.name}</CardTitle>
-          <CardDescription className="text-lg">
-            Sen bir{" "}
-            <Badge className={`${roleInfo.bgColor} ${roleInfo.color} border-0`}>{roleInfo.name}</Badge>
-            sın
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="p-4 rounded-lg bg-card/50 border border-border/50">
-            <p className="text-center text-foreground leading-relaxed">{roleInfo.description}</p>
-          </div>
+  // Rolü gördü ama hazır değil
+  if (isRevealed && !isReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <Card className="max-w-md w-full neon-border backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <div className="text-6xl mb-4">{roleInfo.icon}</div>
+            <CardTitle className={`font-work-sans text-3xl ${roleInfo.color}`}>{roleInfo.name}</CardTitle>
+            <CardDescription className="text-lg">{roleInfo.description}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <Button
+              onClick={() => {
+                wsClient.sendEvent("PLAYER_READY" as any, {})
+                setIsReady(true)
+              }}
+              className="w-full bg-secondary hover:bg-secondary/90"
+            >
+              Hazırım
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              Hazır olan: {readyProgress.ready} / {readyProgress.total}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
-          {roleInfo.nightAction && (
-            <div className="p-3 rounded-lg bg-accent/10 border border-accent/30">
-              <p className="text-sm text-center text-accent">🌙 Gece turlarında özel yeteneğin var!</p>
-            </div>
-          )}
+  // Hazır oldu → diğer oyuncular bekleniyor
+  if (isReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p className="text-muted-foreground">
+          Diğer oyuncuların hazır olması bekleniyor… ({readyProgress.ready}/{readyProgress.total})
+        </p>
+      </div>
+    )
+  }
 
-          <div className="text-center">
-            <div className="text-2xl font-bold text-primary mb-2">{timeLeft}</div>
-            <p className="text-sm text-muted-foreground">Otomatik devam ({timeLeft}s)</p>
-          </div>
-
-          <Button onClick={onContinue} className="w-full bg-secondary hover:bg-secondary/90 holographic-glow">
-            Devam Et
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
-  )
+  return null
 }
+
