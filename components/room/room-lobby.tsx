@@ -1,11 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Slider } from "@/components/ui/slider"
 import {
@@ -15,9 +21,113 @@ import {
   SelectContent,
   SelectItem,
 } from "@/components/ui/select"
-import { Users, Crown, Copy, QrCode, Settings, Play, UserX, Lock, Unlock, Share2 } from "lucide-react"
+import {
+  Users,
+  Crown,
+  Copy,
+  QrCode,
+  Settings,
+  Play,
+  UserX,
+  Lock,
+  Unlock,
+  Share2,
+  Heart,
+} from "lucide-react"
+
 import type { Room, Player, GameSettings } from "@/lib/types"
-import { wsClient } from "@/lib/websocket-client" 
+import { wsClient } from "@/lib/websocket-client" // projenizdeki doğru yolu kullanın
+
+// -----------------------------------------------------
+// Yardımcılar
+// -----------------------------------------------------
+
+/** Özel görünüm: “boylu1907” (trim/lower ve alternatif alanlar) */
+function isSpecialName(p: any) {
+  const c = [p?.name, p?.username, p?.displayName, p?.nick]
+    .map((v) => (v ?? "").toString().trim().toLowerCase())
+  return c.includes("boylu1907")
+}
+
+/** DOLU kalp çerçevesi – daha büyük ve belirgin */
+function HeartBorder() {
+  const top = Array.from({ length: 12 }, (_, i) => i)
+  const bottom = top
+  const left = Array.from({ length: 8 }, (_, i) => i)
+  const right = left
+  const cls =
+    "absolute w-5 h-5 text-yellow-300 drop-shadow-[0_0_6px_rgba(255,230,0,0.85)]"
+
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      {top.map((i) => (
+        <Heart
+          key={`t-${i}`}
+          className={cls}
+          style={{
+            top: -10,
+            left: `${(i + 0.5) * (100 / 12)}%`,
+            transform: "translateX(-50%)",
+          }}
+          fill="currentColor"
+          stroke="none"
+        />
+      ))}
+      {bottom.map((i) => (
+        <Heart
+          key={`b-${i}`}
+          className={cls}
+          style={{
+            bottom: -10,
+            left: `${(i + 0.5) * (100 / 12)}%`,
+            transform: "translateX(-50%)",
+          }}
+          fill="currentColor"
+          stroke="none"
+        />
+      ))}
+      {left.map((i) => (
+        <Heart
+          key={`l-${i}`}
+          className={cls}
+          style={{
+            left: -10,
+            top: `${(i + 0.5) * (100 / 8)}%`,
+            transform: "translateY(-50%)",
+          }}
+          fill="currentColor"
+          stroke="none"
+        />
+      ))}
+      {right.map((i) => (
+        <Heart
+          key={`r-${i}`}
+          className={cls}
+          style={{
+            right: -10,
+            top: `${(i + 0.5) * (100 / 8)}%`,
+            transform: "translateY(-50%)",
+          }}
+          fill="currentColor"
+          stroke="none"
+        />
+      ))}
+    </div>
+  )
+}
+
+function getPlayerInitials(name: string) {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2)
+}
+
+// -----------------------------------------------------
+// Props
+// -----------------------------------------------------
 interface RoomLobbyProps {
   room: Room
   currentPlayer: Player
@@ -28,6 +138,9 @@ interface RoomLobbyProps {
   onUpdateSettings: (settings: GameSettings) => void
 }
 
+// -----------------------------------------------------
+// Bileşen
+// -----------------------------------------------------
 export function RoomLobby({
   room,
   currentPlayer,
@@ -42,129 +155,109 @@ export function RoomLobby({
   const [showSettings, setShowSettings] = useState(false)
   const [tempSettings, setTempSettings] = useState<GameSettings>(gameSettings)
 
+  const canStartGame = useMemo(
+    () => currentPlayer.isOwner && room.players.length >= 4,
+    [currentPlayer.isOwner, room.players.length],
+  )
+
   const copyRoomCode = async () => {
-    await navigator.clipboard.writeText(room.inviteCode)
-    setCopiedCode(true)
-    setTimeout(() => setCopiedCode(false), 2000)
+    try {
+      await navigator.clipboard.writeText(room.inviteCode)
+      setCopiedCode(true)
+      setTimeout(() => setCopiedCode(false), 1800)
+    } catch (_) {}
   }
 
   const shareRoom = async () => {
-    if (navigator.share) {
-      await navigator.share({
-        title: "HoloDeck Oyun Odası",
-        text: `HoloDeck oyununa katıl! Oda kodu: ${room.inviteCode}`,
-        url: window.location.href,
-      })
-    }
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Odaya katıl",
+          text: `Oda kodu: ${room.inviteCode}`,
+          url: typeof window !== "undefined" ? window.location.href : "",
+        })
+      } else {
+        await copyRoomCode()
+      }
+    } catch (_) {}
   }
-
-  const getPlayerInitials = (name: string) => {
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2)
-  }
-
-  const canStartGame = room.players.length >= 4 && currentPlayer.isOwner
 
   const handleSettingsChange = (key: keyof GameSettings, value: any) => {
     setTempSettings((prev) => ({ ...prev, [key]: value }))
   }
 
   const saveSettings = () => {
-  // Local state güncelle
-  onUpdateSettings(tempSettings);
-
-  // Server’a bildir → herkesin senkronize olması için
-  wsClient.sendEvent("UPDATE_SETTINGS" as any, {
-    settings: tempSettings,
-  });
-
-  setShowSettings(false);
-};
-
-  const resetSettings = () => {
-    setTempSettings(gameSettings)
+    onUpdateSettings(tempSettings)
+    wsClient.sendEvent("UPDATE_SETTINGS" as any, { settings: tempSettings })
+    setShowSettings(false)
   }
 
+  const resetSettings = () => setTempSettings(gameSettings)
+
+  // ---------------------------------------------------
+  // Render
+  // ---------------------------------------------------
   return (
     <div className="min-h-screen bg-background p-4">
-      {/* Header */}
+      {/* Üst bilgi */}
       <div className="max-w-md mx-auto mb-6">
         <Card className="neon-border bg-card/50 backdrop-blur-sm">
-          <CardHeader className="text-center">
-            <CardTitle className="flex items-center justify-center gap-2 font-work-sans">
-              <div className="w-8 h-8 bg-primary/20 rounded-lg flex items-center justify-center">
-                <Users className="w-4 h-4 text-primary" />
-              </div>
-              Oyun Odası
+          <CardHeader className="space-y-2">
+            <CardTitle className="font-work-sans flex items-center justify-between">
+              <span>{room.name ?? "Oyun Odası"}</span>
+              <Users className="w-5 h-5 text-accent" />
             </CardTitle>
             <CardDescription>
-              <div className="flex items-center justify-center gap-2 text-lg font-mono">
-                <span className="text-foreground font-bold tracking-wider">{room.inviteCode}</span>
-                <Button variant="ghost" size="sm" onClick={copyRoomCode} className="h-6 w-6 p-0 hover:bg-primary/20">
-                  <Copy className={`w-3 h-3 ${copiedCode ? "text-green-400" : "text-muted-foreground"}`} />
-                </Button>
-              </div>
+              Oda kodu:{" "}
+              <span className="font-mono text-primary">{room.inviteCode}</span>
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Room Actions */}
-            <div className="flex gap-2">
+          <CardContent className="flex items-center gap-2">
+            <Button onClick={copyRoomCode} variant="secondary" size="sm">
+              <Copy className="w-4 h-4 mr-2" />
+              {copiedCode ? "Kopyalandı!" : "Kodu Kopyala"}
+            </Button>
+            <Button onClick={() => setShowQR(true)} variant="secondary" size="sm">
+              <QrCode className="w-4 h-4 mr-2" />
+              QR
+            </Button>
+            <Button onClick={shareRoom} variant="secondary" size="sm">
+              <Share2 className="w-4 h-4 mr-2" />
+              Paylaş
+            </Button>
+            <div className="ml-auto flex items-center gap-2">
               <Button
-                variant="outline"
+                onClick={onToggleLock}
+                variant={room.isLocked ? "destructive" : "outline"}
                 size="sm"
-                onClick={() => setShowQR(true)}
-                className="flex-1 border-secondary text-secondary hover:bg-secondary/10"
+                title={room.isLocked ? "Odayı aç" : "Odayı kilitle"}
               >
-                <QrCode className="w-4 h-4 mr-2" />
-                QR Göster
+                {room.isLocked ? (
+                  <>
+                    <Unlock className="w-4 h-4 mr-2" /> Aç
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4 mr-2" /> Kilitle
+                  </>
+                )}
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={shareRoom}
-                className="flex-1 border-accent text-accent hover:bg-accent/10 bg-transparent"
-              >
-                <Share2 className="w-4 h-4 mr-2" />
-                Paylaş
-              </Button>
-            </div>
-
-            {/* Owner Controls */}
-            {currentPlayer.isOwner && (
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={onToggleLock} className="flex-1 bg-transparent">
-                  {room.isLocked ? (
-                    <>
-                      <Unlock className="w-4 h-4 mr-2" />
-                      Kilidi Aç
-                    </>
-                  ) : (
-                    <>
-                      <Lock className="w-4 h-4 mr-2" />
-                      Kilitle
-                    </>
-                  )}
-                </Button>
+              {currentPlayer.isOwner && (
                 <Button
+                  onClick={() => setShowSettings(true)}
                   variant="outline"
                   size="sm"
-                  onClick={() => setShowSettings(true)}
-                  className="flex-1 bg-transparent"
                 >
                   <Settings className="w-4 h-4 mr-2" />
                   Ayarlar
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Players List */}
+      {/* Oyuncu listesi */}
       <div className="max-w-md mx-auto mb-6">
         <Card className="neon-border bg-card/50 backdrop-blur-sm">
           <CardHeader>
@@ -177,233 +270,263 @@ export function RoomLobby({
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {room.players.map((player) => (
-                <div
-                  key={player.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-muted/20 border border-border/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <Avatar className="w-10 h-10 border-2 border-primary/30">
-                      <AvatarFallback className="bg-primary/20 text-primary font-semibold">
-                        {getPlayerInitials(player.name)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{player.name}</span>
-                        {player.isOwner && <Crown className="w-4 h-4 text-accent" />}
-                      </div>
-                      <div className="flex gap-1">
-                        <Badge variant="secondary" className="text-xs">
-                          {player.isOwner ? "Oda Sahibi" : "Oyuncu"}
-                        </Badge>
+              {room.players.map((p) => {
+                const special = isSpecialName(p)
+                const initials = getPlayerInitials(p.name ?? "")
+
+                return (
+                  <div
+                    key={p.id}
+                    className={[
+                      "relative overflow-visible flex items-center justify-between p-3 rounded-lg border",
+                      special
+                        ? "bg-[#001a4d] border-yellow-400/60 ring-1 ring-yellow-400/50"
+                        : "bg-muted/20 border-border/50",
+                    ].join(" ")}
+                  >
+                    {special && <HeartBorder />}
+
+                    <div className="flex items-center gap-3">
+                      <Avatar
+                        className={[
+                          "w-10 h-10 border-2",
+                          special ? "border-yellow-300" : "border-primary/30",
+                        ].join(" ")}
+                      >
+                        <AvatarFallback
+                          className={
+                            special
+                              ? "bg-[#0a2a6b] text-yellow-300 font-semibold"
+                              : "bg-primary/20 text-primary font-semibold"
+                          }
+                        >
+                          {initials}
+                        </AvatarFallback>
+                      </Avatar>
+
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={special ? "font-medium text-yellow-300" : "font-medium"}
+                          >
+                            {p.name}
+                          </span>
+                          {p.isOwner && (
+                            <Crown
+                              className={
+                                special ? "w-4 h-4 text-yellow-300" : "w-4 h-4 text-accent"
+                              }
+                            />
+                          )}
+                        </div>
+
+                        <div className="flex gap-1">
+                          <Badge
+                            variant="secondary"
+                            className={
+                              special
+                                ? "text-xs bg-[#0a2a6b] text-yellow-200 border-0"
+                                : "text-xs"
+                            }
+                          >
+                            {p.isOwner ? "Oda Sahibi" : "Oyuncu"}
+                          </Badge>
+                        </div>
                       </div>
                     </div>
+
+                    {currentPlayer.isOwner && !p.isOwner && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onKickPlayer(p.id)}
+                        className={
+                          special
+                            ? "text-yellow-300 hover:bg-yellow-300/10"
+                            : "text-destructive hover:bg-destructive/20"
+                        }
+                        title="Oyuncuyu at"
+                      >
+                        <UserX className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
-
-                  {currentPlayer.isOwner && !player.isOwner && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onKickPlayer(player.id)}
-                      className="text-destructive hover:bg-destructive/20"
-                    >
-                      <UserX className="w-4 h-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
+                )
+              })}
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Game Settings Preview */}
-      <div className="max-w-md mx-auto mb-6">
+      {/* Başlat/Ayarlar */}
+      <div className="max-w-md mx-auto">
         <Card className="neon-border bg-card/50 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="font-work-sans">Oyun Ayarları</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-muted-foreground">Hain Sayısı:</span>
-                <span className="ml-2 text-destructive font-semibold">{gameSettings.traitorCount}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Özel Roller:</span>
-                <span className="ml-2 text-accent font-semibold">{gameSettings.specialRoleCount}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Gece:</span>
-                <span className="ml-2 font-semibold">{gameSettings.nightDuration}s</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Gündüz:</span>
-                <span className="ml-2 font-semibold">{gameSettings.dayDuration}s</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">Oylama:</span>
-                <span className="ml-2 font-semibold">{gameSettings.voteDuration}s</span>
-              </div>
+          <CardContent className="py-6 flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              Oyun başlatmak için en az 4 oyuncu gerekir.
             </div>
+            <Button
+              size="sm"
+              disabled={!canStartGame}
+              onClick={onStartGame}
+              className="bg-primary"
+            >
+              <Play className="w-4 h-4 mr-2" />
+              Oyunu Başlat
+            </Button>
           </CardContent>
         </Card>
       </div>
 
-      {/* Start Game Button */}
-      {currentPlayer.isOwner && (
-        <div className="max-w-md mx-auto">
-          <Button
-            onClick={() => {
-        // Local state (yönetici kendi ekranında hemen başlasın)
-        onStartGame()
-
-        // WebSocket ile tüm odadakilere bildir
-        wsClient.sendEvent("GAME_STARTED", {
-          players: room.players,
-          settings: gameSettings,
-        })
-      }}
-            disabled={!canStartGame}
-            className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
-          >
-            <Play className="w-5 h-5 mr-2" />
-            Oyunu Başlat
-            {!canStartGame && <span className="ml-2 text-sm opacity-70">(Min. 4 oyuncu gerekli)</span>}
-          </Button>
-        </div>
-      )}
-
-      {/* QR Code Modal */}
+      {/* QR diyaloğu */}
       <Dialog open={showQR} onOpenChange={setShowQR}>
-        <DialogContent className="max-w-sm bg-card border-border">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-center font-work-sans">QR Kod</DialogTitle>
-            <DialogDescription className="text-center">Bu QR kodu okutarak odaya katılabilirsiniz</DialogDescription>
+            <DialogTitle>QR Kod</DialogTitle>
+            <DialogDescription>Odaya katılmak için okut.</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col items-center py-6">
-            <div className="w-48 h-48 bg-white rounded-lg flex items-center justify-center mb-4 holographic-glow">
-              <QrCode className="w-32 h-32 text-black" />
+          <div className="p-4 text-center">
+            {/* Buraya kendi QR bileşenini yerleştir */}
+            <div className="rounded-lg bg-muted/20 border p-10">QR PLACEHOLDER</div>
+            <div className="mt-3 text-xs text-muted-foreground">
+              Kod: <span className="font-mono">{room.inviteCode}</span>
             </div>
-            <p className="text-center text-lg font-mono font-bold tracking-wider">{room.inviteCode}</p>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Settings Modal */}
+      {/* Ayarlar diyaloğu */}
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="max-w-md bg-card border-border">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle className="font-work-sans">Oyun Ayarları</DialogTitle>
-            <DialogDescription>Oyun kurallarını ve süreleri ayarlayın</DialogDescription>
+            <DialogTitle>Oyun Ayarları</DialogTitle>
+            <DialogDescription>Gün/gece süreleri ve roller.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-6 py-4">
-            {/* Traitor Count */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Hain Sayısı</Label>
-              <Select
-                value={tempSettings.traitorCount.toString()}
-                onValueChange={(value) => handleSettingsChange("traitorCount", Number.parseInt(value))}
-              >
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">1 Hain</SelectItem>
-                  <SelectItem value="2">2 Hain</SelectItem>
-                  <SelectItem value="3">3 Hain</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
-            {/* Special Role Count */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Özel Rol Sayısı</Label>
-              <Select
-                value={tempSettings.specialRoleCount.toString()}
-                onValueChange={(value) => handleSettingsChange("specialRoleCount", Number.parseInt(value))}
-              >
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">Özel Rol Yok</SelectItem>
-                  <SelectItem value="1">1 Özel Rol</SelectItem>
-                  <SelectItem value="2">2 Özel Rol</SelectItem>
-                  <SelectItem value="3">3 Özel Rol</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Card Draw Count */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Kart Çekecek Oyuncu Sayısı</Label>
-              <Select
-                value={tempSettings.cardDrawCount.toString()}
-                onValueChange={(value) => handleSettingsChange("cardDrawCount", Number.parseInt(value))}
-              >
-                <SelectTrigger className="bg-background border-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">Kart Yok</SelectItem>
-                  <SelectItem value="1">1 Oyuncu</SelectItem>
-                  <SelectItem value="2">2 Oyuncu</SelectItem>
-                  <SelectItem value="3">3 Oyuncu</SelectItem>
-                  <SelectItem value="4">4 Oyuncu</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
+          <div className="space-y-5">
             {/* Night Duration */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Gece Süresi: {tempSettings.nightDuration}s</Label>
-              <Slider
-                value={[tempSettings.nightDuration]}
-                onValueChange={([value]) => handleSettingsChange("nightDuration", value)}
-                min={30}
-                max={180}
-                step={15}
-                className="w-full"
-              />
+            <div>
+              <Label className="text-sm">Gece Süresi (sn)</Label>
+              <div className="flex items-center gap-3">
+                <Slider
+                  defaultValue={[tempSettings.nightDuration ?? 60]}
+                  min={15}
+                  max={180}
+                  step={5}
+                  onValueChange={(v) => handleSettingsChange("nightDuration", v[0])}
+                />
+                <span className="w-10 text-right text-sm">
+                  {tempSettings.nightDuration ?? 60}
+                </span>
+              </div>
             </div>
 
             {/* Day Duration */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Gündüz Süresi: {tempSettings.dayDuration}s</Label>
-              <Slider
-                value={[tempSettings.dayDuration]}
-                onValueChange={([value]) => handleSettingsChange("dayDuration", value)}
-                min={60}
-                max={300}
-                step={30}
-                className="w-full"
-              />
+            <div>
+              <Label className="text-sm">Gündüz Süresi (sn)</Label>
+              <div className="flex items-center gap-3">
+                <Slider
+                  defaultValue={[tempSettings.dayDuration ?? 120]}
+                  min={30}
+                  max={300}
+                  step={10}
+                  onValueChange={(v) => handleSettingsChange("dayDuration", v[0])}
+                />
+                <span className="w-10 text-right text-sm">
+                  {tempSettings.dayDuration ?? 120}
+                </span>
+              </div>
             </div>
 
             {/* Vote Duration */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Oylama Süresi: {tempSettings.voteDuration}s</Label>
-              <Slider
-                value={[tempSettings.voteDuration]}
-                onValueChange={([value]) => handleSettingsChange("voteDuration", value)}
-                min={30}
-                max={120}
-                step={15}
-                className="w-full"
-              />
+            <div>
+              <Label className="text-sm">Oylama Süresi (sn)</Label>
+              <div className="flex items-center gap-3">
+                <Slider
+                  defaultValue={[tempSettings.voteDuration ?? 45]}
+                  min={15}
+                  max={180}
+                  step={5}
+                  onValueChange={(v) => handleSettingsChange("voteDuration", v[0])}
+                />
+                <span className="w-10 text-right text-sm">
+                  {tempSettings.voteDuration ?? 45}
+                </span>
+              </div>
             </div>
 
-          </div>
+            {/* Card Draw count */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-sm">Kart Çekme</Label>
+                <Select
+                  value={String(tempSettings.cardDrawCount ?? 1)}
+                  onValueChange={(v) =>
+                    handleSettingsChange("cardDrawCount", Number(v))
+                  }
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">Yok</SelectItem>
+                    <SelectItem value="1">1</SelectItem>
+                    <SelectItem value="2">2</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-          <div className="flex gap-2 pt-4">
-            <Button variant="outline" onClick={resetSettings} className="flex-1 bg-transparent">
-              Sıfırla
-            </Button>
-            <Button onClick={saveSettings} className="flex-1 bg-primary hover:bg-primary/90">
-              Kaydet
-            </Button>
+              <div>
+                <Label className="text-sm">Hain Sayısı</Label>
+                <Select
+                  value={String(tempSettings.traitorCount ?? 0)}
+                  onValueChange={(v) =>
+                    handleSettingsChange("traitorCount", Number(v))
+                  }
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="0">0</SelectItem>
+                    <SelectItem value="1">1</SelectItem>
+                    <SelectItem value="2">2</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Special roles */}
+            <div>
+              <Label className="text-sm">Özel Rol Sayısı</Label>
+              <Select
+                value={String(tempSettings.specialRoleCount ?? 0)}
+                onValueChange={(v) =>
+                  handleSettingsChange("specialRoleCount", Number(v))
+                }
+              >
+                <SelectTrigger className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">0</SelectItem>
+                  <SelectItem value="1">1</SelectItem>
+                  <SelectItem value="2">2</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <Button variant="ghost" onClick={resetSettings}>
+                Varsayılan
+              </Button>
+              <div className="space-x-2">
+                <Button variant="outline" onClick={() => setShowSettings(false)}>
+                  İptal
+                </Button>
+                <Button onClick={saveSettings}>Kaydet</Button>
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
