@@ -1,11 +1,12 @@
 "use client"
-
+import React, { useEffect, useState } from "react"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Sun, Clock } from "lucide-react"
-import { PlayerStatus } from "./player-status"
 import type { Player } from "@/lib/types"
-import { wsClient } from "@/lib/websocket-client"
+import { wsClient } from "@/lib/websocket-client"     // sende gerçek yol neyse onu kullan
+import { PlayerStatus } from "@/components/game/player-status"  // projende olduğu yere göre düzelt
 interface DayPhaseProps {
   currentPlayer: Player
   allPlayers: Player[]
