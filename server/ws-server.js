@@ -322,8 +322,8 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       if (alive.length === 0) return { ok:false, note:'Eşleştirilecek oyuncu yok' };
       const t = randPick(alive);
       S.loversPairs = [...(S.loversPairs || []), [actorId, t.id]];
-      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} ile âşıksın. Amacınız oyun sonuna kadar ikinizinde sağ kalması. Unutma biriniz ölürse diğeri de ölür.`);
-      addNote(t.id, `${S.currentTurn}. Gün: ${actor?.name || 'Biri'} ile âşıksın. Amacınız oyun sonuna kadar ikinizinde sağ kalması. Unutma biriniz ölürse diğeri de ölür.`);
+      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} ile âşıksın`);
+      addNote(t.id, `${S.currentTurn}. Gün: ${actor?.name || 'Biri'} ile âşıksın`);
       return { ok:true, partnerId: t.id, title, desc };
     }
 
@@ -367,7 +367,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       if (!innocents.length) return { ok:false, note:'Masum bulunamadı' };
       const t = randPick(innocents);
       Array.from(room.players.keys()).forEach(pid => {
-        S.playerNotes[pid] = [...(S.playerNotes[pid] || []), `${S.currentTurn}. Gün: ${t.name} kesin masum!`];
+        S.playerNotes[pid] = [...(S.playerNotes[pid] || []), `${S.currentTurn}. Gün: ${t.name} kesin masum! (sahte)`];
       });
       return { ok:true, targetId:t.id, title, desc };
     }
@@ -415,7 +415,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const alive = alivePlayers();
       if (!alive.length) return { ok:false, note:'Canlı yok' };
       const t = randPick(alive);
-      Array.from(room.players.keys()).forEach(pid => addNote(pid, `${S.currentTurn}. Gün: ${t.name} masum olabilir`));
+      Array.from(room.players.keys()).forEach(pid => addNote(pid, `${S.currentTurn}. Gün: ${t.name} masum olabilir (genel not)`));
       return { ok:true, targetId:t.id, title, desc };
     }
 
@@ -544,15 +544,6 @@ function getWinCondition(players, loversPairs) {
     return { winner: 'INNOCENTS', gameEnded: true };
   }
 
-  return { winner: null, gameEnded: false };
-};
-  }
-  if (bombers.length === 0 && traitors.length >= nonTraitors.length && traitors.length > 0) {
-    return { winner: 'TRAITORS', gameEnded: true };
-  }
-  if (bombers.length === 0 && traitors.length === 0) {
-    return { winner: 'INNOCENTS', gameEnded: true };
-  }
   return { winner: null, gameEnded: false };
 }
 
@@ -871,6 +862,7 @@ function processNightActions(roomId) {
     }
   }
 
+  const updatedActions = S.nightActions;
   S.nightActions = updatedActions;
   S.deathsThisTurn = newDeaths;
   if (newDeaths.length > 0) S.deathLog = [...S.deathLog, ...newDeaths];
