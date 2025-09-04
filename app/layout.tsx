@@ -5,7 +5,7 @@ import "./globals.css"
 export const metadata: Metadata = {
   title: "Tebova - Gerçeğin değiştiği oyun.",
   description: "Klasik vampir-köylü oyununa yeni bir soluk... Çeşitli roller ve ilginç olaylar seni bekliyor.",
-  generator: "v0.app",
+  generator: "linkedin.com/in/mehmet-teber",
 }
 
 export default function RootLayout({
