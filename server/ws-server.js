@@ -138,10 +138,6 @@ function sendToPlayer(room, playerId, type, payload) {
   for (const s of room.sockets) {
     if (s.readyState === WebSocket.OPEN && s.playerId === playerId) {
       s.send(JSON.stringify({ type, payload, serverTime: now() }));
-      break;
-    }
-  }
-
 function mirrorNotesToAll(room) {
   const S = room.state;
   const all = new Set();
@@ -154,6 +150,10 @@ function mirrorNotesToAll(room) {
     ids.forEach(pid => { S.playerNotes[pid] = merged.slice(); });
   }
 }
+
+      break;
+    }
+  }
 }
 
 /* Effects are applied authoritatively on server */
@@ -617,6 +617,13 @@ function startPhase(roomId, phase, durationSec) {
     currentCardDrawer: room.state.currentCardDrawer ?? null,
   });
   broadcastSnapshot(roomId);
+
+  // Auto-skip CARD_DRAWING if there's no duration (prevents getting stuck)
+  if (phase === 'CARD_DRAWING' && (!durationSec || durationSec === 0)) {
+    const d = room.settings?.dayDuration || 120;
+    startPhase(roomId, 'DAY_DISCUSSION', d);
+    return;
+  }
 
   if (durationSec > 0) {
     room.timer = setTimeout(() => {
