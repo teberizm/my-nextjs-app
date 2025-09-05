@@ -322,8 +322,8 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       if (alive.length === 0) return { ok:false, note:'Eşleştirilecek oyuncu yok' };
       const t = randPick(alive);
       S.loversPairs = [...(S.loversPairs || []), [String(actorId), String(t.id)]];
-      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} ile âşıksın`);
-      addNote(t.id, `${S.currentTurn}. Gün: ${actor?.name || 'Biri'} ile âşıksın`);
+      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} ile âşıksın. Amacınız son ana kadar beraber hareket edip sona kalmak. Unutma biriniz ölürse diğeriniz de ölür.`);
+      addNote(t.id, `${S.currentTurn}. Gün: ${actor?.name || 'Biri'} ile âşıksın. Amacınız son ana kadar beraber hareket edip sona kalmak. Unutma biriniz ölürse diğeriniz de ölür.`);
       return { ok:true, partnerId: t.id, title, desc };
     }
 
@@ -350,7 +350,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       if (!alive.length) return { ok:false, note:'Canlı yok' };
       const t = randPick(alive);
       addNote(actorId, `${S.currentTurn}. Gün: ${t.name} oyuncusuna gizli mesaj: (notlara bak)`);
-      addNote(t.id, `${S.currentTurn}. Gün: Sana gizli bir mesaj bırakıldı.`);
+      addNote(t.id, `${S.currentTurn}. Gün: Hain tahmininden daha da yakın.`);
       return { ok:true, targetId:t.id, title, desc };
     }
 
@@ -358,7 +358,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const alive = alivePlayers().filter(p=>p.id!==actorId);
       if (!alive.length) return { ok:false, note:'Canlı yok' };
       const t = randPick(alive);
-      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} için bulanık ipucu: rolü ${Math.random()<0.5?'masuma yakın':'hain gibi'}`);
+      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} için ipucu: rolü ${Math.random()<0.5?'masuma yakın':'hain gibi'}`);
       return { ok:true, title, desc };
     }
     /* 6 */ case 'MASS_NOTE_FAKE_INNOCENT': {
@@ -367,7 +367,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       if (!innocents.length) return { ok:false, note:'Masum bulunamadı' };
       const t = randPick(innocents);
       Array.from(room.players.keys()).forEach(pid => {
-        S.playerNotes[pid] = [...(S.playerNotes[pid] || []), `${S.currentTurn}. Gün: ${t.name} kesin masum! (sahte)`];
+        S.playerNotes[pid] = [...(S.playerNotes[pid] || []), `${S.currentTurn}. Gün: ${t.name} kesin masum!`];
       });
       return { ok:true, targetId:t.id, title, desc };
     }
@@ -389,7 +389,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const roles = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
       let fake = randPick(roles);
       if (fake === t.role) fake = roles[(roles.indexOf(fake)+1)%roles.length];
-      S.playerNotes[actorId] = [...(S.playerNotes[actorId] || []), `${S.currentTurn}. Gün: YANLIŞ ipucu → ${t.name} aslında ${roleTR(fake)}`];
+      S.playerNotes[actorId] = [...(S.playerNotes[actorId] || []), `${S.currentTurn}. Gün: ipucu → ${t.name} aslında ${roleTR(fake)}`];
       return { ok:true, targetId:t.id, title, desc };
     }
 
@@ -415,7 +415,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const alive = alivePlayers();
       if (!alive.length) return { ok:false, note:'Canlı yok' };
       const t = randPick(alive);
-      Array.from(room.players.keys()).forEach(pid => addNote(pid, `${S.currentTurn}. Gün: ${t.name} masum olabilir (genel not)`));
+      Array.from(room.players.keys()).forEach(pid => addNote(pid, `${S.currentTurn}. Gün: ${t.name} masum olabilir`));
       return { ok:true, targetId:t.id, title, desc };
     }
 
