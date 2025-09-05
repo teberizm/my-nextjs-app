@@ -321,7 +321,7 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       const alive = alivePlayers().filter(p=>p.id!==actorId);
       if (alive.length === 0) return { ok:false, note:'Eşleştirilecek oyuncu yok' };
       const t = randPick(alive);
-      S.loversPairs = [...(S.loversPairs || []), [actorId, t.id]];
+      S.loversPairs = [...(S.loversPairs || []), [String(actorId), String(t.id)]];
       addNote(actorId, `${S.currentTurn}. Gün: ${t.name} ile âşıksın`);
       addNote(t.id, `${S.currentTurn}. Gün: ${actor?.name || 'Biri'} ile âşıksın`);
       return { ok:true, partnerId: t.id, title, desc };
@@ -1007,8 +1007,8 @@ function advancePhase(roomId) {
 
   const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()), (room.state && room.state.loversPairs) || []);
   if (gameEnded && S.phase !== 'END') {
-    S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner };
-        broadcast(room, 'GAME_ENDED', { winner, loversPairs: S.loversPairs || [], turn: S.currentTurn });
+    S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner, loversPairs: (S.loversPairs ? [...S.loversPairs] : []) };
+        broadcast(room, 'GAME_ENDED', { winner, loversPairs: S.loversPairs || [], loverIds: (S.loversPairs || []).flatMap(([a,b]) => [a,b]), turn: S.currentTurn });
     startPhase(roomId, 'END', 0);
     return;
   }
