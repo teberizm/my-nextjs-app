@@ -1,5 +1,84 @@
 // ws-server.js (authoritative server: timers + roles + actions + votes + QR card draw)
 const express = require('express');
+
+// === MAD/NOTE HELPERS INSERTED ===
+function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function sample(arr, k = 1) {
+  const a = [...arr]; const out = [];
+  k = Math.max(0, Math.min(k, a.length));
+  for (let i = 0; i < k; i++) out.push(a.splice(randInt(0, a.length - 1), 1)[0]);
+  return out;
+}
+function isMad(player) {
+  try {
+    return (
+      player?.role === 'DELI' ||
+      player?.trueRole === 'DELI' ||
+      player?.systemRole === 'DELI' ||
+      (Array.isArray(player?.traits) && player.traits.includes('MAD')) ||
+      (Array.isArray(player?.tags) && player.tags.includes('MAD'))
+    );
+  } catch { return false; }
+}
+function visibleRole(player) { return player?.visibleRole || player?.fakeRole || player?.role; }
+
+function generateFakeNoteForRole(roleName, actor, target, room, S) {
+  const playersArr = Array.from(room.players?.values?.() || []);
+  const alive = playersArr.filter(p => !p.isDead && p.id !== actor?.id);
+  const tname = target?.name || 'hedef';
+  if (roleName === 'WATCHER' || roleName === 'EVIL_WATCHER') {
+    const pool = alive.filter(p => p.id !== target?.id);
+    const r = randInt(0, 2);
+    if (r === 0) return `${S.currentTurn}. Gece: ${tname} yanına kimse gitmedi.`;
+    const picked = sample(pool, r);
+    const names = picked.map(p => p.name);
+    if (names.length === 1) return `${S.currentTurn}. Gece: ${tname} yanına ${names[0]} gitti.`;
+    return `${S.currentTurn}. Gece: ${tname} yanına ${names[0]} ve ${names[1]} gitti.`;
+  }
+  if (roleName === 'DETECTIVE' || roleName === 'EVIL_DETECTIVE') {
+    const evilLike = Math.random() < 0.5;
+    return `${S.currentTurn}. Gece: ${tname} ${evilLike ? 'hain gibi' : 'masuma benziyor'}.`;
+  }
+  if (roleName === 'DOCTOR' || roleName === 'EVIL_DOCTOR') {
+    const success = Math.random() < 0.5;
+    if (success) return `${S.currentTurn}. Gece: ${tname} oyuncusunu kurtardın.`;
+    return `${S.currentTurn}. Gece: ${tname} oyuncusunu bekledin fakat saldırı olmadı.`;
+  }
+  if (roleName === 'GUARDIAN' || roleName === 'EVIL_GUARDIAN') {
+    const blocked = Math.random() < 0.5;
+    return blocked
+      ? `${S.currentTurn}. Gece: ${tname} oyuncusunu tuttun (aksiyonunu kilitledin).`
+      : `${S.currentTurn}. Gece: ${tname} oyuncusuna gitmeye çalıştın, bir şey olmadı.`;
+  }
+  if (roleName === 'BOMBER') {
+    const didExplode = Math.random() < 0.5;
+    if (didExplode) return `${S.currentTurn}. Gece: Bombalarını patlattın; birkaç hedef etkilendi.`;
+    return `${S.currentTurn}. Gece: ${tname} üzerine bomba yerleştirdin.`;
+  }
+  if (roleName === 'KILLER' || roleName === 'MAFIA' || roleName === 'ASSASSIN') {
+    const success = Math.random() < 0.5;
+    return success
+      ? `${S.currentTurn}. Gece: ${tname} oyuncusuna saldırdın.`
+      : `${S.currentTurn}. Gece: Saldırı girişimin sonuçsuz kaldı.`;
+  }
+  return `${S.currentTurn}. Gece: Aksiyonunu yaptın, sıra dışı bir şey olmadı.`;
+}
+
+function writeNote({ S, room, actor, roleForMad, target, text }) {
+  const actorId = actor?.id; if (!actorId) return;
+  if (!S.playerNotes) S.playerNotes = {};
+  if (isMad(actor) && roleForMad) {
+    const fake = generateFakeNoteForRole(roleForMad, actor, target, room, S);
+    S.playerNotes[actorId] = [ ...(S.playerNotes[actorId] || []), fake ];
+    return;
+  }
+  if (text) {
+    S.playerNotes[actorId] = [ ...(S.playerNotes[actorId] || []), text ];
+  }
+}
+// === END MAD/NOTE HELPERS ===
+
+
 const http = require('http');
 const WebSocket = require('ws');
 
@@ -615,7 +694,88 @@ function startPhase(roomId, phase, durationSec) {
 
 /* --------- Core resolvers (authoritative) ---------- */
 
+
+/* === DELI fake-feedback generator (adds notes only for DELI; no real effects) === */
+function generateFakeForDeli(room) {
+  const S = room.state;
+  const players = Array.from(room.players.values());
+  const alive = players.filter(p => p.isAlive);
+
+  const addNote = (pid, text) => {
+    S.playerNotes[pid] = [...(S.playerNotes[pid] || []), text];
+  };
+
+  // Build 'true visitors' per target from all actions (for WATCHER lies)
+  const trueVisitorsByTarget = {};
+  (S.nightActions || []).forEach(a => {
+    if (!a || !a.targetId) return;
+    if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
+    trueVisitorsByTarget[a.targetId].add(a.playerId);
+  });
+
+  // DELI actors who submitted an action with a target
+  const deliActions = (S.nightActions || []).filter(a => {
+    if (!a || !a.targetId) return false;
+    const actor = players.find(p => p.id === a.playerId);
+    return actor && actor.role === 'DELI';
+  });
+
+  deliActions.forEach(a => {
+    const actor = players.find(p => p.id === a.playerId);
+    const target = players.find(p => p.id === a.targetId);
+    if (!actor || !target) return;
+    const turn = S.currentTurn;
+    const emu = actor.displayRole; // DOCTOR | GUARDIAN | WATCHER | DETECTIVE
+
+    if (emu === 'DOCTOR') {
+      addNote(actor.id, `${turn}. Gece: ${target.name} oyuncusunu iyileştirdin.`);
+    } else if (emu === 'GUARDIAN') {
+      addNote(actor.id, `${turn}. Gece: ${target.name} oyuncusunu tuttun (aksiyonunu kilitledin).`);
+    } else if (emu === 'WATCHER') {
+      const trueSet = new Set(Array.from((trueVisitorsByTarget[target.id] || new Set()).values()));
+      const pool = alive.filter(p => p.id !== actor.id && p.id !== target.id && !trueSet.has(p.id));
+      const pick = () => (pool.length ? pool[Math.floor(Math.random()*pool.length)] : null);
+      const f1 = pick();
+      let f2 = null;
+      if (pool.length > 1 && Math.random() < 0.5) {
+        f2 = pick();
+        if (f2 && f1 && f2.id === f1.id) {
+          const idx = pool.findIndex(x => x.id === f1.id);
+          const alt = pool[(idx + 1) % pool.length];
+          if (alt && alt.id !== f1.id) f2 = alt;
+        }
+      }
+      const names = [f1, f2].filter(Boolean).map(p => p.name);
+      if (names.length === 0) {
+        const fb = alive.find(p => p.id !== actor.id && p.id !== target.id);
+        if (fb) addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${fb.name} gitti.`);
+        else addNote(actor.id, `${turn}. Gece: ${target.name} yanına biri gitti.`);
+      } else if (names.length === 1) {
+        addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${names[0]} gitti.`);
+      } else {
+        addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${names[0]} ve ${names[1]} gitti.`);
+      }
+    } else if (emu === 'DETECTIVE') {
+      const t = target;
+      const evil = t && (t.role === 'BOMBER' || t.role === 'EVIL_GUARDIAN' || t.role === 'EVIL_WATCHER' || t.role === 'EVIL_DETECTIVE');
+      const hint = evil ? 'masuma benziyor' : 'hain gibi';
+      addNote(actor.id, `${turn}. Gece: ${target.name} ${hint}.`);
+    } else {
+      addNote(actor.id, `${turn}. Gece: ${target.name} üzerinde bir hareket yaptın.`);
+    }
+  });
+}
+
 function processNightActions(roomId) {
+  // --- true visitors map for real watcher results ---
+  const trueVisitorsByTarget = {};
+  (S.nightActions || []).forEach(a => {
+    if (a && a.targetId) {
+      if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
+      trueVisitorsByTarget[a.targetId].add(a.playerId);
+    }
+  });
+
   const room = rooms.get(roomId);
   if (!room) return;
   const S = room.state;
@@ -664,6 +824,25 @@ function processNightActions(roomId) {
   // 3) Doctor, Survivor, other protects
   const revived = new Set();
   const doctorResults = new Map();
+
+  /* DOCTOR NOTES INSERTED */
+  if (typeof doctorResults !== 'undefined' && doctorResults && doctorResults.forEach) {
+    doctorResults.forEach((res, docId) => {
+      const doctorPlayer = room.players.get(docId);
+      const act = (S.nightActions || []).find(x => x.playerId === docId);
+      const target = act?.targetId ? room.players.get(act.targetId) : null;
+
+      if (!doctorPlayer) return;
+      if (blockedPlayers && blockedPlayers.has && blockedPlayers.has(docId)) {
+        writeNote({ S, room, actor: doctorPlayer, roleForMad: visibleRole(doctorPlayer) || 'DOCTOR', target, text: `${S.currentTurn}. Gece: Gardiyan tarafından tutulduğun için iyileştirme yapamadın.` });
+      } else if (target) {
+        const text = res?.success
+          ? `${target.name} oyuncusunu kurtardın.`
+          : `${target.name} oyuncusunu bekledin fakat saldırı olmadı.`;
+        writeNote({ S, room, actor: doctorPlayer, roleForMad: 'DOCTOR', target, text });
+      }
+    });
+  }
   const protectedPlayers = new Set();
   const survivorActors = new Set();
 
@@ -690,7 +869,37 @@ function processNightActions(roomId) {
           survivorActors.add(actor.id);
           const remaining = Math.max((actor.survivorShields || 0) - 1, 0);
           // note
-          const note = `${S.currentTurn}. Gece: Kendini korudun (${remaining} hak kaldı)`;
+          const note = `${S.currentTurn}. Gece: Kendini korudun (${remaining} hak kaldı
+  /* WATCHER/DETECTIVE RESULTS INSERTED */
+  (S.nightActions || []).forEach(a => {
+    const actor = room.players.get(a.playerId);
+    if (!actor || !a.targetId) return;
+    const target = room.players.get(a.targetId);
+    if (!target) return;
+    if (blockedPlayers && blockedPlayers.has && blockedPlayers.has(actor.id)) {
+      writeNote({ S, room, actor, roleForMad: visibleRole(actor), target, text: `${S.currentTurn}. Gece: Gardiyan tarafından tutulduğun için aksiyonun gerçekleşmedi.` });
+      return;
+    }
+    // WATCHER types
+    if (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') {
+      const ids = Array.from((trueVisitorsByTarget[target.id] || new Set()).values())
+        .filter(pid => pid !== actor.id);
+      const names = ids.map(pid => room.players.get(pid)?.name).filter(Boolean);
+      let line = `${S.currentTurn}. Gece: ${target.name} yanına `;
+      if (names.length === 0) line += 'kimse gitmedi.';
+      else if (names.length === 1) line += `${names[0]} gitti.`;
+      else line += `${names[0]} ve ${names[1]}${names.length > 2 ? ' (diğerleri de)' : ''} gitti.`;
+      writeNote({ S, room, actor, roleForMad: 'WATCHER', target, text: line });
+    }
+    // DETECTIVE types
+    if (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') {
+      const evil = ['BOMBER','EVIL_GUARDIAN','EVIL_WATCHER','EVIL_DETECTIVE','MAFIA','ASSASSIN'].includes(target.role);
+      const hint = evil ? 'hain gibi' : 'masuma benziyor';
+      const line = `${S.currentTurn}. Gece: ${target.name} ${hint}.`;
+      writeNote({ S, room, actor, roleForMad: 'DETECTIVE', target, text: line });
+    }
+  });
+)`;
           S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
         }
       } else if (actor.role === 'DOCTOR') {
@@ -700,9 +909,7 @@ function processNightActions(roomId) {
         } else {
           doctorResults.set(actor.id, { success: false });
         }
-      } else if (a.targetId) {
-        protectedPlayers.add(a.targetId);
-      }
+      } else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
 
   // QR-based extra shields for tonight
@@ -711,7 +918,7 @@ function processNightActions(roomId) {
   // Reverse protectors effect: protectors get targeted
   let reverseProtectKillers = [];
   if (S.reverseProtectEffectsTonight) {
-    const protectors = S.nightActions.filter(a => a.actionType === 'PROTECT').map(a => a.playerId);
+    const protectors = S.nightActions.filter(a => a.actionType === 'PROTECT' && (players.find(p => p.id === a.playerId)?.role !== 'DELI')).map(a => a.playerId);
     reverseProtectKillers = protectors.map(pid => ({ actorId: pid, targetId: pid, reverse: true }));
   }
 
@@ -875,6 +1082,7 @@ function processNightActions(roomId) {
   S.roleLockRandomNextNight = [];
   S.cardShieldsNextNight = [];
 
+  generateFakeForDeli(room);
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
 
