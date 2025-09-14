@@ -660,8 +660,9 @@ function generateFakeForDeli(room) {
       let f2 = null;
       if (pool.length > 1 && Math.random() < 0.5) {
         f2 = pick();
-        if (f2 && f1 && f2.id == f1.id):
-            f2 = pool[(pool.indexOf(f2)+1) % pool.length];
+        if (f2 && f1 && f2.id == f1.id){
+          f2 = pool[(pool.indexOf(f2) + 1) % pool.length];
+        }
       }
       const names = [f1, f2].filter(Boolean).map(p => p.name);
       if (names.length === 0) {
