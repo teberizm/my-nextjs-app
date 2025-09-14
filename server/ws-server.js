@@ -945,7 +945,7 @@ function processNightActions(roomId) {
   S.bypassShieldsActorNextNight = [];
   S.roleLockRandomNextNight = [];
   S.cardShieldsNextNight = [];
-
+  generateFakeForDeli(room);
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
 
