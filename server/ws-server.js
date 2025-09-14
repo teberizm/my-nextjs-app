@@ -616,7 +616,7 @@ function startPhase(roomId, phase, durationSec) {
 /* --------- Core resolvers (authoritative) ---------- */
 
 
-/* -------- DELI fake-feedback generator (adds notes only for DELI; no real effects) -------- */
+/* === DELI fake-feedback generator (adds notes only for DELI; no real effects) === */
 function generateFakeForDeli(room) {
   const S = room.state;
   const players = Array.from(room.players.values());
@@ -660,8 +660,10 @@ function generateFakeForDeli(room) {
       let f2 = null;
       if (pool.length > 1 && Math.random() < 0.5) {
         f2 = pick();
-        if (f2 && f1 && f2.id == f1.id){
-          f2 = pool[(pool.indexOf(f2) + 1) % pool.length];
+        if (f2 && f1 && f2.id === f1.id) {
+          const idx = pool.findIndex(x => x.id === f1.id);
+          const alt = pool[(idx + 1) % pool.length];
+          if (alt && alt.id !== f1.id) f2 = alt;
         }
       }
       const names = [f1, f2].filter(Boolean).map(p => p.name);
@@ -745,7 +747,6 @@ function processNightActions(roomId) {
     .forEach((a) => {
       const actor = players.find((p) => p.id === a.playerId);
       const target = players.find((p) => p.id === a.targetId);
-      if (actor && actor.role === 'DELI') { return; }
 
       if (!actor) return;
       if (blockedPlayers.has(actor.id)) {
@@ -771,9 +772,7 @@ function processNightActions(roomId) {
         } else {
           doctorResults.set(actor.id, { success: false });
         }
-      } else if (a.targetId) {
-        protectedPlayers.add(a.targetId);
-      }
+      } else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
 
   // QR-based extra shields for tonight
@@ -782,7 +781,7 @@ function processNightActions(roomId) {
   // Reverse protectors effect: protectors get targeted
   let reverseProtectKillers = [];
   if (S.reverseProtectEffectsTonight) {
-    const protectors = S.nightActions.filter(a => a.actionType === 'PROTECT' && (players.find(p=>p.id===a.playerId)?.role !== 'DELI')).map(a => a.playerId);
+    const protectors = S.nightActions.filter(a => a.actionType === 'PROTECT' && (players.find(p => p.id === a.playerId)?.role !== 'DELI')).map(a => a.playerId);
     reverseProtectKillers = protectors.map(pid => ({ actorId: pid, targetId: pid, reverse: true }));
   }
 
@@ -945,6 +944,7 @@ function processNightActions(roomId) {
   S.bypassShieldsActorNextNight = [];
   S.roleLockRandomNextNight = [];
   S.cardShieldsNextNight = [];
+
   generateFakeForDeli(room);
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
