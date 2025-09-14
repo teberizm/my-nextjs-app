@@ -869,7 +869,8 @@ function processNightActions(roomId) {
           survivorActors.add(actor.id);
           const remaining = Math.max((actor.survivorShields || 0) - 1, 0);
           // note
-          const note = `${S.currentTurn}. Gece: Kendini korudun (${remaining} hak kaldı
+          const note = `${S.currentTurn}. Gece: Kendini korudun (${remaining} hak kaldı)`;
+S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
   /* WATCHER/DETECTIVE RESULTS INSERTED */
   (S.nightActions || []).forEach(a => {
     const actor = room.players.get(a.playerId);
@@ -877,7 +878,12 @@ function processNightActions(roomId) {
     const target = room.players.get(a.targetId);
     if (!target) return;
     if (blockedPlayers && blockedPlayers.has && blockedPlayers.has(actor.id)) {
-      writeNote({ S, room, actor, roleForMad: visibleRole(actor), target, text: `${S.currentTurn}. Gece: Gardiyan tarafından tutulduğun için aksiyonun gerçekleşmedi.` });
+      writeNote({
+  S, room, actor,
+  roleForMad: visibleRole(actor),
+  target,
+  text: `${S.currentTurn}. Gece: Gardiyan tarafından tutulduğun için aksiyonun gerçekleşmedi.`
+});
       return;
     }
     // WATCHER types
