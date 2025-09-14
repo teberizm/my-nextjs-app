@@ -615,6 +615,75 @@ function startPhase(roomId, phase, durationSec) {
 
 /* --------- Core resolvers (authoritative) ---------- */
 
+
+/* -------- DELI fake-feedback generator (adds notes only for DELI; no real effects) -------- */
+function generateFakeForDeli(room) {
+  const S = room.state;
+  const players = Array.from(room.players.values());
+  const alive = players.filter(p => p.isAlive);
+
+  const addNote = (pid, text) => {
+    S.playerNotes[pid] = [...(S.playerNotes[pid] || []), text];
+  };
+
+  // Build 'true visitors' per target from all actions (for WATCHER lies)
+  const trueVisitorsByTarget = {};
+  (S.nightActions || []).forEach(a => {
+    if (!a || !a.targetId) return;
+    if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
+    trueVisitorsByTarget[a.targetId].add(a.playerId);
+  });
+
+  // DELI actors who submitted an action with a target
+  const deliActions = (S.nightActions || []).filter(a => {
+    if (!a || !a.targetId) return false;
+    const actor = players.find(p => p.id === a.playerId);
+    return actor && actor.role === 'DELI';
+  });
+
+  deliActions.forEach(a => {
+    const actor = players.find(p => p.id === a.playerId);
+    const target = players.find(p => p.id === a.targetId);
+    if (!actor || !target) return;
+    const turn = S.currentTurn;
+    const emu = actor.displayRole; // DOCTOR | GUARDIAN | WATCHER | DETECTIVE
+
+    if (emu === 'DOCTOR') {
+      addNote(actor.id, `${turn}. Gece: ${target.name} oyuncusunu iyileştirdin.`);
+    } else if (emu === 'GUARDIAN') {
+      addNote(actor.id, `${turn}. Gece: ${target.name} oyuncusunu tuttun (aksiyonunu kilitledin).`);
+    } else if (emu === 'WATCHER') {
+      const trueSet = new Set(Array.from((trueVisitorsByTarget[target.id] || new Set()).values()));
+      const pool = alive.filter(p => p.id !== actor.id && p.id !== target.id && !trueSet.has(p.id));
+      const pick = () => (pool.length ? pool[Math.floor(Math.random()*pool.length)] : null);
+      const f1 = pick();
+      let f2 = null;
+      if (pool.length > 1 && Math.random() < 0.5) {
+        f2 = pick();
+        if (f2 && f1 && f2.id == f1.id):
+            f2 = pool[(pool.indexOf(f2)+1) % pool.length];
+      }
+      const names = [f1, f2].filter(Boolean).map(p => p.name);
+      if (names.length === 0) {
+        const fb = alive.find(p => p.id !== actor.id && p.id !== target.id);
+        if (fb) addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${fb.name} gitti.`);
+        else addNote(actor.id, `${turn}. Gece: ${target.name} yanına biri gitti.`);
+      } else if (names.length === 1) {
+        addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${names[0]} gitti.`);
+      } else {
+        addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${names[0]} ve ${names[1]} gitti.`);
+      }
+    } else if (emu === 'DETECTIVE') {
+      const t = target;
+      const evil = t && (t.role === 'BOMBER' || t.role === 'EVIL_GUARDIAN' || t.role === 'EVIL_WATCHER' || t.role === 'EVIL_DETECTIVE');
+      const hint = evil ? 'masuma benziyor' : 'hain gibi';
+      addNote(actor.id, `${turn}. Gece: ${target.name} ${hint}.`);
+    } else {
+      addNote(actor.id, `${turn}. Gece: ${target.name} üzerinde bir hareket yaptın.`);
+    }
+  });
+}
+
 function processNightActions(roomId) {
   const room = rooms.get(roomId);
   if (!room) return;
@@ -675,6 +744,7 @@ function processNightActions(roomId) {
     .forEach((a) => {
       const actor = players.find((p) => p.id === a.playerId);
       const target = players.find((p) => p.id === a.targetId);
+      if (actor && actor.role === 'DELI') { return; }
 
       if (!actor) return;
       if (blockedPlayers.has(actor.id)) {
@@ -711,7 +781,7 @@ function processNightActions(roomId) {
   // Reverse protectors effect: protectors get targeted
   let reverseProtectKillers = [];
   if (S.reverseProtectEffectsTonight) {
-    const protectors = S.nightActions.filter(a => a.actionType === 'PROTECT').map(a => a.playerId);
+    const protectors = S.nightActions.filter(a => a.actionType === 'PROTECT' && (players.find(p=>p.id===a.playerId)?.role !== 'DELI')).map(a => a.playerId);
     reverseProtectKillers = protectors.map(pid => ({ actorId: pid, targetId: pid, reverse: true }));
   }
 
