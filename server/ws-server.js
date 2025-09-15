@@ -688,15 +688,6 @@ function generateFakeForDeli(room) {
 }
 
 function processNightActions(roomId) {
-  // --- helper maps for night notes (added) ---
-  const trueVisitorsByTarget = {};
-  (S.nightActions || []).forEach(a => {
-    if (!a || !a.targetId) return;
-    if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
-    trueVisitorsByTarget[a.targetId].add(a.playerId);
-  });
-  const doctorTargets = new Map(); // docId -> targetId
-
   const room = rooms.get(roomId);
   if (!room) return;
   const S = room.state;
@@ -718,21 +709,7 @@ function processNightActions(roomId) {
     })
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-  
-  // (added) Guardian own notes
   guardianActions.forEach((a) => {
-    if (!blockedPlayers.has(a.playerId) && a.targetId) {
-      const gActor = room.players.get(a.playerId);
-      const gTarget = room.players.get(a.targetId);
-      if (gActor && gTarget) {
-        S.playerNotes[gActor.id] = [
-          ...(S.playerNotes[gActor.id] || []),
-          `${S.currentTurn}. Gece: ${gTarget.name} oyuncusunu tuttun (aksiyonunu kilitledin).`,
-        ];
-      }
-    }
-  });
-guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
       blockedPlayers.add(a.targetId);
       S.playerNotes[a.targetId] = [
@@ -774,24 +751,6 @@ guardianActions.forEach((a) => {
       if (!actor) return;
       if (blockedPlayers.has(actor.id)) {
         if (actor.role === 'DOCTOR') doctorResults.set(actor.id, { success: false });
-  // (added) Doctor own notes
-  if (doctorResults && doctorResults.forEach) {
-    doctorResults.forEach((res, docId) => {
-      const doc = room.players.get(docId);
-      const tgtId = doctorTargets.get(docId);
-      const target = tgtId ? room.players.get(tgtId) : null;
-      if (!doc) return;
-      if (blockedPlayers.has && blockedPlayers.has(docId)) {
-        S.playerNotes[doc.id] = [ ...(S.playerNotes[doc.id] || []), `${S.currentTurn}. Gece: Gardiyan tarafından tutulduğun için iyileştirme yapamadın.` ];
-      } else if (target) {
-        const text = res && res.success
-          ? `${target.name} oyuncusunu kurtardın.`
-          : `${target.name} oyuncusunu bekledin fakat saldırı olmadı.`;
-        S.playerNotes[doc.id] = [ ...(S.playerNotes[doc.id] || []), `${S.currentTurn}. Gece: ${text}` ];
-      }
-    });
-  }
-
         return;
       }
 
@@ -810,10 +769,8 @@ guardianActions.forEach((a) => {
         if (target && (!target.isAlive || adjustedKills.some(k=>k.targetId===target.id))) {
           revived.add(target.id);
           doctorResults.set(actor.id, { success: true });
-          doctorTargets.set(actor.id, target.id);
         } else {
           doctorResults.set(actor.id, { success: false });
-          if (target) doctorTargets.set(actor.id, target.id);
         }
       } else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
@@ -852,15 +809,6 @@ guardianActions.forEach((a) => {
         list.push(a.targetId);
       }
       bombsByOwner[owner] = list;
-      // (added) Bomber own note for planting
-      const ownerP = room.players.get(owner);
-      const targetP = room.players.get(a.targetId);
-      if (ownerP && targetP) {
-        S.playerNotes[owner] = [
-          ...(S.playerNotes[owner] || []),
-          `${S.currentTurn}. Gece: ${targetP.name} üzerine bomba yerleştirdin.`,
-        ];
-      }
     }
   });
 
@@ -942,33 +890,7 @@ guardianActions.forEach((a) => {
 
   room.players = newPlayersMap;
 
-  
-  // (added) WATCHER / DETECTIVE real results
-  (S.nightActions || []).forEach(a => {
-    if (!a || !a.targetId) return;
-    const actor = room.players.get(a.playerId);
-    const target = room.players.get(a.targetId);
-    if (!actor || !target) return;
-    if (blockedPlayers && blockedPlayers.has && blockedPlayers.has(actor.id)) {
-      S.playerNotes[actor.id] = [ ...(S.playerNotes[actor.id] || []), `${S.currentTurn}. Gece: Gardiyan tarafından tutulduğun için aksiyonun gerçekleşmedi.` ];
-      return;
-    }
-    if (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') {
-      const ids = Array.from((trueVisitorsByTarget[target.id] || new Set()).values()).filter(pid => pid !== actor.id);
-      const names = ids.map(pid => room.players.get(pid)?.name).filter(Boolean);
-      let line = `${S.currentTurn}. Gece: ${target.name} yanına `;
-      if (names.length === 0) line += 'kimse gitmedi.';
-      else if (names.length === 1) line += `${names[0]} gitti.`;
-      else line += `${names[0]} ve ${names[1]}${names.length > 2 ? ' (diğerleri de)' : ''} gitti.`;
-      S.playerNotes[actor.id] = [ ...(S.playerNotes[actor.id] || []), line ];
-    }
-    if (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') {
-      const evil = (target.role === 'BOMBER') || (target.role === 'EVIL_GUARDIAN') || (target.role === 'EVIL_WATCHER') || (target.role === 'EVIL_DETECTIVE');
-      const hint = evil ? 'hain gibi' : 'masuma benziyor';
-      S.playerNotes[actor.id] = [ ...(S.playerNotes[actor.id] || []), `${S.currentTurn}. Gece: ${target.name} ${hint}.` ];
-    }
-  });
-// attackers notes for kills
+  // attackers notes for kills
   adjustedKills.forEach((k) => {
     const actor = room.players.get(k.actorId);
     const target = k.targetId ? room.players.get(k.targetId) : null;
