@@ -101,7 +101,7 @@ export const EFFECTS_CATALOG: Record<string, EffectDef> = {
 
   /* 15 */ SECRET_MESSAGE_TO_RANDOM: {
     title: "Gizli Mesaj",
-    desc: "Rastgele bir CANLI oyuncunun notlarına gizli bir mesaj bırakılır.",
+    desc: "Canlı bir oyuncuya istediğin mesajı gönderebilirsin. Bu mesaj sadece gönderdiğin oyuncuda gözükür.",
     timing: "IMMEDIATE",
   },
 
