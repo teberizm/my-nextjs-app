@@ -771,7 +771,10 @@ function processNightActions(roomId) {
         }
       } else if (actor.role === 'DOCTOR') {
   // Engellendiyse burada sadece "blocked" bilgisini kaydet, karar verme
-   
+     if (blockedPlayers.has(actor.id)) {
+    doctorResults.set(actor.id, { blocked: true, targetId: target ? target.id : (a?.targetId ?? null) });
+    return;
+  }
   if (!target) {
     doctorResults.set(actor.id, { blocked: false, targetId: null }); // hedef yok
     return;
