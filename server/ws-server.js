@@ -516,36 +516,51 @@ function getWinCondition(players, loversPairs) {
   const alive = players.filter((p) => p.isAlive);
   const bombers = alive.filter((p) => p.role === 'BOMBER');
   const traitors = alive.filter((p) => isTraitorRole(p.role));
-  const nonTraitorsNonBombers = alive.filter((p) => !isTraitorRole(p.role) && p.role !== 'BOMBER');
+  const nonTraitorsNonBombers = alive.filter(
+    (p) => !isTraitorRole(p.role) && p.role !== 'BOMBER'
+  );
 
-  // Lovers override: last 3 and any two are lovers -> lovers win
+  // Lovers override: son 3 kişi ve içlerinden herhangi iki kişi sevgiliyse → Lovers kazanır
   if (alive.length === 3 && Array.isArray(loversPairs)) {
-    const aliveIds = new Set(alive.map(p => p.id));
+    const aliveIds = new Set(alive.map((p) => p.id));
     for (const pair of loversPairs) {
-      const [a,b] = pair || [];
+      const [a, b] = pair || [];
       if (aliveIds.has(a) && aliveIds.has(b)) {
         return { winner: 'LOVERS', gameEnded: true };
       }
     }
   }
 
-  // Bomber is solo: only way bomber wins is as last survivor
+  // YENİ KURAL: Son 2 kişi hayattaysa ve aralarında tam 1 Bombacı varsa → Bombacı kazanır
+  if (alive.length === 2) {
+    const bomberCount = bombers.length;
+    if (bomberCount === 1) {
+      return { winner: 'BOMBER', gameEnded: true };
+    }
+  }
+
+  // Tek başına kalan Bombacı → kazanır
   if (alive.length === 1 && alive[0].role === 'BOMBER') {
     return { winner: 'BOMBER', gameEnded: true };
   }
 
-  // Traitors win when they are >= others (excluding bombers)
-  if (traitors.length > 0 && bombers.length === 0 && traitors.length >= nonTraitorsNonBombers.length) {
+  // Hainler: (Bombacı yokken) Hain sayısı, Bombacı-dışı masumlara >= ise → Hainler kazanır
+  if (
+    traitors.length > 0 &&
+    bombers.length === 0 &&
+    traitors.length >= nonTraitorsNonBombers.length
+  ) {
     return { winner: 'TRAITORS', gameEnded: true };
   }
 
-  // Innocents win when no bombers and no traitors remain
+  // Masumlar: Bombacı da Hain de kalmadıysa → Masumlar kazanır
   if (bombers.length === 0 && traitors.length === 0) {
     return { winner: 'INNOCENTS', gameEnded: true };
   }
 
   return { winner: null, gameEnded: false };
 }
+
 
 /* -------------- Phase control -------------- */
 function startPhase(roomId, phase, durationSec) {
@@ -836,21 +851,30 @@ function processNightActions(roomId) {
   });
 
   // apply new plants (each bomber has own list; can target anyone, including other bombers)
-  bombPlacers.forEach((a) => {
-    const tName = (players.find(p => p.id === a.targetId)?.name) || 'bir oyuncu';
-  S.playerNotes[a.playerId] = [
-    ...(S.playerNotes[a.playerId] || []),
-    `${S.currentTurn}. Gece: ${tName} üzerine bomba yerleştirdin.`,
-  ];
-    if (a.targetId) {
-      const owner = a.playerId;
-      const list = bombsByOwner[owner] || [];
-      if (!list.includes(a.targetId)) {
-        list.push(a.targetId);
-      }
-      bombsByOwner[owner] = list;
-    }
-  });
+  // apply new plants (each bomber has own list; can target anyone, including other bombers)
+bombPlacers.forEach((a) => {
+  if (!a.targetId) return;
+  const owner = a.playerId;
+  const list = bombsByOwner[owner] || [];
+  const tName = (players.find(p => p.id === a.targetId)?.name) || 'bir oyuncu';
+
+  if (!list.includes(a.targetId)) {
+    list.push(a.targetId);
+    S.playerNotes[owner] = [
+      ...(S.playerNotes[owner] || []),
+      `${S.currentTurn}. Gece: ${tName} üzerine bomba yerleştirdin.`,
+    ];
+  } else {
+    // zaten bombalı hedef → tekrar ekleme ve oyuncuyu bilgilendir
+    S.playerNotes[owner] = [
+      ...(S.playerNotes[owner] || []),
+      `${S.currentTurn}. Gece: ${tName} üzerinde zaten bomban vardı (yenisini yerleştirmedin).`,
+    ];
+  }
+
+  bombsByOwner[owner] = list;
+});
+
   // === REAL WATCHER RESULTS ===
 // === REAL WATCHER RESULTS ===
 (() => {
@@ -1150,7 +1174,20 @@ function processNightActions(roomId) {
   S.bypassShieldsActorNextNight = [];
   S.roleLockRandomNextNight = [];
   S.cardShieldsNextNight = [];
-
+  {
+  const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()), (room.state.loversPairs || []));
+  if (gameEnded) {
+    room.state.game = { ...(room.state.game || {}), endedAt: new Date(), winningSide: winner, loversPairs: (room.state.loversPairs ? [...room.state.loversPairs] : []) };
+    broadcast(room, 'GAME_ENDED', {
+      winner,
+      loversPairs: room.state.loversPairs || [],
+      loverIds: (room.state.loversPairs || []).flatMap(([a, b]) => [a, b]),
+      turn: room.state.currentTurn,
+    });
+    startPhase(roomId, 'END', 0);
+    return; // oyun bitti, gece sonuçlarına geçme
+  }
+}
   generateFakeForDeli(room);
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
