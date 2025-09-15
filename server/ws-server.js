@@ -718,7 +718,15 @@ function processNightActions(roomId) {
       ];
     }
   });
-
+  guardianActions.forEach((a) => {
+  if (!a.targetId) return;
+  const tgt = players.find(p => p.id === a.targetId);
+  const tName = tgt ? tgt.name : 'bir oyuncu';
+  S.playerNotes[a.playerId] = [
+    ...(S.playerNotes[a.playerId] || []),
+    `${S.currentTurn}. Gece: ${tName} oyuncusunu tuttun (aksiyonunu kilitledin).`,
+  ];
+});
   // 2) Kills (pair with actor)
   const killers = S.nightActions.filter(
     (a) => a.actionType === 'KILL' && !blockedPlayers.has(a.playerId),
@@ -766,15 +774,32 @@ function processNightActions(roomId) {
           S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
         }
       } else if (actor.role === 'DOCTOR') {
-        if (target && (!target.isAlive || adjustedKills.some(k=>k.targetId===target.id))) {
-          revived.add(target.id);
-          doctorResults.set(actor.id, { success: true });
-        } else {
-          doctorResults.set(actor.id, { success: false });
-        }
+        if (blockedPlayers.has(actor.id)) {
+    doctorResults.set(actor.id, { success: false, blocked: true, targetId: a.targetId || null });
+  } else if (target && (!target.isAlive || adjustedKills.some(k=>k.targetId===target.id))) {
+    revived.add(target.id);
+    doctorResults.set(actor.id, { success: true, targetId: target.id });
+  } else {
+    doctorResults.set(actor.id, { success: false, targetId: a.targetId || null });
+  }
       } else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
-
+  doctorResults.forEach((res, docId) => {
+  const tName = res?.targetId ? (players.find(p => p.id === res.targetId)?.name || 'hedef') : 'hedef';
+  if (res?.blocked) {
+    S.playerNotes[docId] = [...(S.playerNotes[docId] || []),
+      `${S.currentTurn}. Gece: ${tName} için iyileştirme yapamadın (tutuldun).`
+    ];
+  } else if (res?.success) {
+    S.playerNotes[docId] = [...(S.playerNotes[docId] || []),
+      `${S.currentTurn}. Gece: ${tName} oyuncusunu kurtardın.`
+    ];
+  } else {
+    S.playerNotes[docId] = [...(S.playerNotes[docId] || []),
+      `${S.currentTurn}. Gece: ${tName} için gittin ama saldırı yoktu/kurtarma gerekmedi.`
+    ];
+  }
+});
   // QR-based extra shields for tonight
   (S.cardShieldsNextNight || []).forEach(pid => protectedPlayers.add(pid));
 
@@ -802,6 +827,11 @@ function processNightActions(roomId) {
 
   // apply new plants (each bomber has own list; can target anyone, including other bombers)
   bombPlacers.forEach((a) => {
+    const tName = (players.find(p => p.id === a.targetId)?.name) || 'bir oyuncu';
+  S.playerNotes[a.playerId] = [
+    ...(S.playerNotes[a.playerId] || []),
+    `${S.currentTurn}. Gece: ${tName} üzerine bomba yerleştirdin.`,
+  ];
     if (a.targetId) {
       const owner = a.playerId;
       const list = bombsByOwner[owner] || [];
@@ -811,7 +841,70 @@ function processNightActions(roomId) {
       bombsByOwner[owner] = list;
     }
   });
+  // === REAL WATCHER RESULTS ===
+(() => {
+  // Hedefe giden gerçek ziyaretçiler (tüm aksiyonlardan derlenir)
+  const trueVisitorsByTarget = {};
+  (S.nightActions || []).forEach(a => {
+    if (!a || !a.targetId) return;
+    if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
+    trueVisitorsByTarget[a.targetId].add(a.playerId);
+  });
 
+  const watcherActs = (S.nightActions || []).filter(a => {
+    const actor = players.find(p => p.id === a.playerId);
+    return actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') && a.targetId;
+  });
+
+  watcherActs.forEach(a => {
+    const actor = players.find(p => p.id === a.playerId);
+    if (!actor) return;
+    const blocked = blockedPlayers.has(actor.id);
+    const t = players.find(p => p.id === a.targetId);
+    const tName = t ? t.name : 'hedef';
+    if (blocked) {
+      S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []),
+        `${S.currentTurn}. Gece: ${tName} üzerinde gözcülük yapamadın (tutuldun).`
+      ];
+      return;
+    }
+    const set = new Set([...(trueVisitorsByTarget[a.targetId] || new Set())]);
+    set.delete(actor.id);
+    const names = Array.from(set).map(pid => (players.find(p => p.id === pid)?.name || 'biri'));
+    const line = names.length === 0
+      ? `${S.currentTurn}. Gece: ${tName} yanına kimse gitmedi.`
+      : (names.length === 1
+          ? `${S.currentTurn}. Gece: ${tName} yanına ${names[0]} gitti.`
+          : `${S.currentTurn}. Gece: ${tName} yanına ${names.slice(0, -1).join(', ')} ve ${names.slice(-1)} gitti.`);
+    S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), line];
+  });
+})();
+(() => {
+  const isEvil = (role) => ['BOMBER','EVIL_GUARDIAN','EVIL_WATCHER','EVIL_DETECTIVE'].includes(role);
+  const detectiveActs = (S.nightActions || []).filter(a => {
+    const actor = players.find(p => p.id === a.playerId);
+    return actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') && a.targetId;
+  });
+
+  detectiveActs.forEach(a => {
+    const actor = players.find(p => p.id === a.playerId);
+    if (!actor) return;
+    const blocked = blockedPlayers.has(actor.id);
+    const t = players.find(p => p.id === a.targetId);
+    const tName = t ? t.name : 'hedef';
+    if (blocked) {
+      S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []),
+        `${S.currentTurn}. Gece: ${tName} için soruşturma yapamadın (tutuldun).`
+      ];
+      return;
+    }
+    if (!t) return;
+    const hint = isEvil(t.role) ? 'hain gibi' : 'masuma benziyor';
+    S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []),
+      `${S.currentTurn}. Gece: ${tName} ${hint}.`
+    ];
+  });
+})();
   // 5) Bomb detonate victims (per owner; no chain detonation)
   let bombVictims = [];
   detonateActions.forEach((det) => {
@@ -833,7 +926,7 @@ function processNightActions(roomId) {
 
   // persist bombs state
   S.bombsByOwner = bombsByOwner;
-
+  
   // 6 ) Apply effects to players map (authoritative)
   const newPlayersMap = new Map(room.players);
   // clear previous shields
