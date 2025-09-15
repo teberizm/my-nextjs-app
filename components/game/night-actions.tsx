@@ -361,18 +361,10 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
         </Card>
 
         {/* Action Button */}
-        YENİ
 <div className="space-y-3">
-  {visibleRole === "BOMBER" && bomberNoTargetLeft && (
-    <div className="text-sm text-muted-foreground px-2">
-      Bu gece yerleştirecek hedef kalmadı (tüm canlı hedeflerde zaten bomban var).
-      İstersen <strong>Bombaları Patlat</strong> butonunu kullanabilirsin.
-    </div>
-  )}
-
   <Button
     onClick={handleSubmitAction}
-    disabled={!selectedTarget || (visibleRole === "BOMBER" && bomberNoTargetLeft)}
+    disabled={!selectedTarget}
     className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
   >
     {getActionIcon()}
@@ -384,8 +376,8 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
   {visibleRole === "BOMBER" && (
     <Button
       onClick={() => {
-        onSubmitAction(null, "BOMB_DETONATE");
-        setActionSubmitted(true);
+        onSubmitAction(null, "BOMB_DETONATE")
+        setActionSubmitted(true)
       }}
       variant="destructive"
       className="w-full"
