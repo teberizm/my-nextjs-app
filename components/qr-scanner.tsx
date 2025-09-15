@@ -17,9 +17,10 @@ declare global {
 
 export default function QrScanner({ open, onDetected, onClose }: QrScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+const canvasRef = useRef<HTMLCanvasElement | null>(null);
+const [err, setErr] = useState<string | null>(null);
+const [stream, setStream] = useState<MediaStream | null>(null);
+const streamRef = useRef<MediaStream | null>(null); // ✅ akımı ref’te de tut
   const [torchOn, setTorchOn] = useState(false);
   const rafRef = useRef<number | null>(null);
   const loopTimer = useRef<any>(null);
@@ -44,12 +45,13 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
           audio: false,
         };
         const s = await navigator.mediaDevices.getUserMedia(constraints);
-        if (!active) return;
-        setStream(s);
-        const v = videoRef.current!;
-        v.srcObject = s;
-        await v.play();
-        startDetectLoop();
+if (!active) return;
+setStream(s);
+streamRef.current = s;                  // ✅ ref’e yaz
+const v = videoRef.current!;
+v.srcObject = s;
+await v.play();
+startDetectLoop();
       } catch (e: any) {
         setErr(e?.message ?? "Kamera açılamadı. Lütfen tarayıcı izinlerini kontrol edin.");
       }
@@ -63,16 +65,31 @@ export default function QrScanner({ open, onDetected, onClose }: QrScannerProps)
   }, [open]);
 
   function stopAll() {
-    stoppedRef.current = true;
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    if (loopTimer.current) clearTimeout(loopTimer.current);
-    loopTimer.current = null;
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-    }
-    setStream(null);
-    setTorchOn(false);
+  stoppedRef.current = true;
+  if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  if (loopTimer.current) clearTimeout(loopTimer.current);
+  loopTimer.current = null;
+
+  // 🔇 Videoyu durdur ve srcObject'i temizle (özellikle iOS için önemli)
+  const v = videoRef.current;
+  try { v?.pause(); } catch {}
+  if (v && 'srcObject' in v) {
+    try { (v as any).srcObject = null; } catch {}
   }
+
+  // 🎥 Tüm track'leri mutlaka durdur (ref veya state üzerinden)
+  const s = streamRef.current || stream || (v && (v as any).srcObject);
+  if (s && typeof (s as MediaStream).getTracks === 'function') {
+    (s as MediaStream).getTracks().forEach((t) => {
+      try { t.stop(); } catch {}
+    });
+  }
+
+  streamRef.current = null;
+  setStream(null);
+  setTorchOn(false);
+}
+
 
   async function toggleTorch() {
     try {
