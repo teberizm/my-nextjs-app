@@ -688,14 +688,14 @@ function generateFakeForDeli(room) {
 }
 
 function processNightActions(roomId) {
-  // --- Build helper maps for this night ---
+  // --- helper maps for night notes (added) ---
   const trueVisitorsByTarget = {};
   (S.nightActions || []).forEach(a => {
     if (!a || !a.targetId) return;
     if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
     trueVisitorsByTarget[a.targetId].add(a.playerId);
   });
-  const doctorTargets = new Map(); // docId -> targetId (for notes)
+  const doctorTargets = new Map(); // docId -> targetId
 
   const room = rooms.get(roomId);
   if (!room) return;
@@ -718,16 +718,8 @@ function processNightActions(roomId) {
     })
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-  guardianActions.forEach((a) => {
-    if (!blockedPlayers.has(a.playerId) && a.targetId) {
-      blockedPlayers.add(a.targetId);
-      S.playerNotes[a.targetId] = [
-        ...(S.playerNotes[a.targetId] || []),
-        `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`,
-      ];
-    }
   
-  // Guardian own notes (who blocked whom)
+  // (added) Guardian own notes
   guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
       const gActor = room.players.get(a.playerId);
@@ -740,7 +732,15 @@ function processNightActions(roomId) {
       }
     }
   });
-});
+guardianActions.forEach((a) => {
+    if (!blockedPlayers.has(a.playerId) && a.targetId) {
+      blockedPlayers.add(a.targetId);
+      S.playerNotes[a.targetId] = [
+        ...(S.playerNotes[a.targetId] || []),
+        `${S.currentTurn}. Gece: Gardiyan tarafından tutuldun`,
+      ];
+    }
+  });
 
   // 2) Kills (pair with actor)
   const killers = S.nightActions.filter(
@@ -769,8 +769,12 @@ function processNightActions(roomId) {
     })
     .forEach((a) => {
       const actor = players.find((p) => p.id === a.playerId);
-      
-  // --- Doctor own notes (success/fail/blocked) ---
+      const target = players.find((p) => p.id === a.targetId);
+
+      if (!actor) return;
+      if (blockedPlayers.has(actor.id)) {
+        if (actor.role === 'DOCTOR') doctorResults.set(actor.id, { success: false });
+  // (added) Doctor own notes
   if (doctorResults && doctorResults.forEach) {
     doctorResults.forEach((res, docId) => {
       const doc = room.players.get(docId);
@@ -787,11 +791,7 @@ function processNightActions(roomId) {
       }
     });
   }
-const target = players.find((p) => p.id === a.targetId);
 
-      if (!actor) return;
-      if (blockedPlayers.has(actor.id)) {
-        if (actor.role === 'DOCTOR') doctorResults.set(actor.id, { success: false });
         return;
       }
 
@@ -808,11 +808,12 @@ const target = players.find((p) => p.id === a.targetId);
         }
       } else if (actor.role === 'DOCTOR') {
         if (target && (!target.isAlive || adjustedKills.some(k=>k.targetId===target.id))) {
-          doctorTargets.set(actor.id, target.id);
           revived.add(target.id);
           doctorResults.set(actor.id, { success: true });
+          doctorTargets.set(actor.id, target.id);
         } else {
           doctorResults.set(actor.id, { success: false });
+          if (target) doctorTargets.set(actor.id, target.id);
         }
       } else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
@@ -851,14 +852,16 @@ const target = players.find((p) => p.id === a.targetId);
         list.push(a.targetId);
       }
       bombsByOwner[owner] = list;
-    
-      // Bomber own note for planting
+      // (added) Bomber own note for planting
       const ownerP = room.players.get(owner);
       const targetP = room.players.get(a.targetId);
       if (ownerP && targetP) {
-        S.playerNotes[owner] = [ ...(S.playerNotes[owner] || []), `${S.currentTurn}. Gece: ${targetP.name} üzerine bomba yerleştirdin.` ];
+        S.playerNotes[owner] = [
+          ...(S.playerNotes[owner] || []),
+          `${S.currentTurn}. Gece: ${targetP.name} üzerine bomba yerleştirdin.`,
+        ];
       }
-}
+    }
   });
 
   // 5) Bomb detonate victims (per owner; no chain detonation)
@@ -940,7 +943,7 @@ const target = players.find((p) => p.id === a.targetId);
   room.players = newPlayersMap;
 
   
-  // --- WATCHER / DETECTIVE real results ---
+  // (added) WATCHER / DETECTIVE real results
   (S.nightActions || []).forEach(a => {
     if (!a || !a.targetId) return;
     const actor = room.players.get(a.playerId);
@@ -960,7 +963,7 @@ const target = players.find((p) => p.id === a.targetId);
       S.playerNotes[actor.id] = [ ...(S.playerNotes[actor.id] || []), line ];
     }
     if (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') {
-      const evil = (target.role === 'BOMBER') || (target.role && (target.role === 'EVIL_GUARDIAN' || target.role === 'EVIL_WATCHER' || target.role === 'EVIL_DETECTIVE'));
+      const evil = (target.role === 'BOMBER') || (target.role === 'EVIL_GUARDIAN') || (target.role === 'EVIL_WATCHER') || (target.role === 'EVIL_DETECTIVE');
       const hint = evil ? 'hain gibi' : 'masuma benziyor';
       S.playerNotes[actor.id] = [ ...(S.playerNotes[actor.id] || []), `${S.currentTurn}. Gece: ${target.name} ${hint}.` ];
     }
@@ -1151,22 +1154,10 @@ function advancePhase(roomId) {
   const S = room.state;
   const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 };
 
-  const { winner, gameEnded } = getWinCondition(
-    Array.from(room.players.values()),
-    (room.state && room.state.loversPairs) || []
-  );
+  const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()), (room.state && room.state.loversPairs) || []);
   if (gameEnded && S.phase !== 'END') {
-    S.game = {
-      ...(S.game || {}),
-      endedAt: new Date(),
-      winningSide: winner,
-      loversPairs: (S.loversPairs ? [...S.loversPairs] : []),
-    };
-    broadcast(room, 'GAME_ENDED', {
-      winner,
-      loversPairs: S.loversPairs || [],
-      turn: S.currentTurn,
-    });
+    S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner, loversPairs: (S.loversPairs ? [...S.loversPairs] : []) };
+        broadcast(room, 'GAME_ENDED', { winner, loversPairs: S.loversPairs || [], loverIds: (S.loversPairs || []).flatMap(([a,b]) => [a,b]), turn: S.currentTurn });
     startPhase(roomId, 'END', 0);
     return;
   }
