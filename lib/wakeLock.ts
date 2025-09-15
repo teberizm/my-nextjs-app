@@ -20,12 +20,12 @@ export async function startWakeLock() {
       return;
     }
   } catch {}
-  // Fallback: NoSleep.js (isteğe bağlı)
+  // Fallback (opsiyonel): npm i nosleep.js
   try {
-    const mod = await import('nosleep.js'); // npm i nosleep.js
+    const mod = await import('nosleep.js');
     const NoSleep = (mod as any).default || mod;
     const ns = new NoSleep();
-    ns.enable();
+    ns.enable();               // user gesture içinde çağrılırsa sorunsuz olur
     (window as any).__wakeOn__ = true;
   } catch {}
 }
