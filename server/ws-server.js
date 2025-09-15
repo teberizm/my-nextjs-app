@@ -649,39 +649,49 @@ function generateFakeForDeli(room) {
     const emu = actor.displayRole; // DOCTOR | GUARDIAN | WATCHER | DETECTIVE
 
     if (emu === 'DOCTOR') {
-      addNote(actor.id, `${turn}. Gece: ${target.name} oyuncusunu iyileştirdin.`);
-    } else if (emu === 'GUARDIAN') {
-      addNote(actor.id, `${turn}. Gece: ${target.name} oyuncusunu tuttun (aksiyonunu kilitledin).`);
-    } else if (emu === 'WATCHER') {
-      const trueSet = new Set(Array.from((trueVisitorsByTarget[target.id] || new Set()).values()));
-      const pool = alive.filter(p => p.id !== actor.id && p.id !== target.id && !trueSet.has(p.id));
-      const pick = () => (pool.length ? pool[Math.floor(Math.random()*pool.length)] : null);
-      const f1 = pick();
-      let f2 = null;
-      if (pool.length > 1 && Math.random() < 0.5) {
-        f2 = pick();
-        if (f2 && f1 && f2.id === f1.id) {
-          const idx = pool.findIndex(x => x.id === f1.id);
-          const alt = pool[(idx + 1) % pool.length];
-          if (alt && alt.id !== f1.id) f2 = alt;
-        }
-      }
-      const names = [f1, f2].filter(Boolean).map(p => p.name);
-      if (names.length === 0) {
-        const fb = alive.find(p => p.id !== actor.id && p.id !== target.id);
-        if (fb) addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${fb.name} gitti.`);
-        else addNote(actor.id, `${turn}. Gece: ${target.name} yanına biri gitti.`);
-      } else if (names.length === 1) {
-        addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${names[0]} gitti.`);
-      } else {
-        addNote(actor.id, `${turn}. Gece: ${target.name} yanına ${names[0]} ve ${names[1]} gitti.`);
-      }
-    } else if (emu === 'DETECTIVE') {
-      const t = target;
-      const evil = t && (t.role === 'BOMBER' || t.role === 'EVIL_GUARDIAN' || t.role === 'EVIL_WATCHER' || t.role === 'EVIL_DETECTIVE');
-      const hint = evil ? 'masuma benziyor' : 'hain gibi';
-      addNote(actor.id, `${turn}. Gece: ${target.name} ${hint}.`);
-    } else {
+  const variants = [
+    `${turn}. Gece: ${target.name} kişisini iyileştirdin.`,
+    `${turn}. Gece: ${target.name} kişisine gittin ama bir şey olmadı.`
+  ];
+  addNote(actor.id, variants[Math.floor(Math.random() * variants.length)]);
+} else if (emu === 'GUARDIAN') {
+  addNote(actor.id, `${turn}. Gece: ${target.name} kişisini tuttun (aksiyonunu kilitledin).`);
+} else if (emu === 'WATCHER') {
+  // gerçek ziyaretçileri havuz dışı bırak → bilinçli yanlış bilgi
+  const trueSet = new Set(Array.from((trueVisitorsByTarget[target.id] || new Set()).values()));
+  const pool = alive.filter(p => p.id !== actor.id && p.id !== target.id && !trueSet.has(p.id));
+
+  // 0, 1 veya 2 sahte ziyaretçi → tamamen rastgele
+  const maxPick = Math.min(pool.length, 2);
+  const choices = [0, 1, 2].filter(n => n <= maxPick);
+  const n = choices[Math.floor(Math.random() * choices.length)];
+
+  // benzersiz n kişi seç
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  const picked = shuffled.slice(0, n);
+  const names = picked.map(p => p.name);
+
+  let line;
+  if (names.length === 0) {
+    line = `${turn}. Gece: ${target.name} kişisine kimse gelmedi.`;
+  } else if (names.length === 1) {
+    line = `${turn}. Gece: ${target.name} kişisine ${names[0]} gitti.`;
+  } else {
+    line = `${turn}. Gece: ${target.name} kişisine ${names[0]} ve ${names[1]} gitti.`;
+  }
+  addNote(actor.id, line);
+}else if (emu === 'DETECTIVE') {else if (emu === 'DETECTIVE') {
+  // Hedefin gerçek rolünü hariç tutarak iki farklı rastgele rol seç
+  const ROLE_POOL = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR','EVIL_GUARDIAN','EVIL_WATCHER','EVIL_DETECTIVE'];
+  const pool = ROLE_POOL.filter(r => r !== target.role);
+  const pick = () => pool[Math.floor(Math.random() * pool.length)];
+  const r1 = pick();
+  let r2 = pick();
+  if (r2 === r1) {
+    r2 = pool[(pool.indexOf(r1) + 1) % pool.length];
+  }
+  addNote(actor.id, `${turn}. Gece: ${target.name}, ${roleTR(r1)} veya ${roleTR(r2)} olabilir.`);
+} else {
       addNote(actor.id, `${turn}. Gece: ${target.name} üzerinde bir hareket yaptın.`);
     }
   });
