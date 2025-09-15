@@ -187,31 +187,31 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
       wsClient.sendEvent("RESET_GAME" as any, {});
     }
   };
-
-  if (!currentPlayer) {
-    return <JoinRoomDialog onJoin={handleJoin} />;
-  }
-
-  const isLobby = gamePhase === "LOBBY";
-  useEffect(() => {
+ useEffect(() => {
   // kullanıcı ilk kez bir yere tıklayınca ekran kapanmasını engelle
   const once = async () => {
     if (!(window as any).__wakeOn__) {
       try { await startWakeLock(); } catch {}
     }
-    document.removeEventListener("click", once, true);
-    document.removeEventListener("touchstart", once, true);
   };
-  document.addEventListener("click", once, true);
-  document.addEventListener("touchstart", once, true);
+
+  // capture + once ile kendini otomatik kaldırır
+  document.addEventListener("click", once, { capture: true, once: true });
+  document.addEventListener("touchstart", once, { capture: true, once: true });
 
   return () => {
-    // sayfadan ayrılırken kapat (oyun reset vs.)
     try { stopWakeLock(); } catch {}
+    // once:true olduğundan kaldırmak şart değil ama güvenli:
     document.removeEventListener("click", once, true);
     document.removeEventListener("touchstart", once, true);
   };
 }, []);
+  if (!currentPlayer) {
+    return <JoinRoomDialog onJoin={handleJoin} />;
+  }
+
+  const isLobby = gamePhase === "LOBBY";
+
   return (
     <>
       {isLobby ? (
