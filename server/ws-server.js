@@ -776,10 +776,7 @@ function processNightActions(roomId) {
         }
       } else if (actor.role === 'DOCTOR') {
   // Engellendiyse burada sadece "blocked" bilgisini kaydet, karar verme
-  if (blockedPlayers.has(actor.id)) {
-    doctorResults.set(actor.id, { blocked: true, targetId: target ? target.id : (a?.targetId ?? null) });
-    return;
-  }
+   
   if (!target) {
     doctorResults.set(actor.id, { blocked: false, targetId: null }); // hedef yok
     return;
@@ -791,22 +788,6 @@ function processNightActions(roomId) {
 }
       else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
-  doctorResults.forEach((res, docId) => {
-  const tName = res?.targetId ? (players.find(p => p.id === res.targetId)?.name || 'hedef') : 'hedef';
-  if (res?.blocked) {
-    S.playerNotes[docId] = [...(S.playerNotes[docId] || []),
-      `${S.currentTurn}. Gece: ${tName} için iyileştirme yapamadın (tutuldun).`
-    ];
-  } else if (res?.success) {
-    S.playerNotes[docId] = [...(S.playerNotes[docId] || []),
-      `${S.currentTurn}. Gece: ${tName} oyuncusunu kurtardın.`
-    ];
-  } else {
-    S.playerNotes[docId] = [...(S.playerNotes[docId] || []),
-      `${S.currentTurn}. Gece: ${tName} için gittin ama saldırı yoktu/kurtarma gerekmedi.`
-    ];
-  }
-});
   // QR-based extra shields for tonight
   (S.cardShieldsNextNight || []).forEach(pid => protectedPlayers.add(pid));
 
@@ -849,43 +830,64 @@ function processNightActions(roomId) {
     }
   });
   // === REAL WATCHER RESULTS ===
+// === REAL WATCHER RESULTS ===
 (() => {
-  // Hedefe giden gerçek ziyaretçiler (tüm aksiyonlardan derlenir)
-  const trueVisitorsByTarget = {};
-  (S.nightActions || []).forEach(a => {
-    if (!a || !a.targetId) return;
-    if (!trueVisitorsByTarget[a.targetId]) trueVisitorsByTarget[a.targetId] = new Set();
-    trueVisitorsByTarget[a.targetId].add(a.playerId);
-  });
+  // hedefe giden gerçek ziyaretçiler (tüm gece aksiyonlarından derlenir)
+  const trueVisitorsByTarget = new Map();
+  for (const a of (S.nightActions || [])) {
+    if (!a || !a.targetId || !a.playerId) continue;
+    if (!trueVisitorsByTarget.has(a.targetId)) {
+      trueVisitorsByTarget.set(a.targetId, new Set());
+    }
+    trueVisitorsByTarget.get(a.targetId).add(a.playerId);
+  }
 
+  // watcher/e. watcher aksiyonları
   const watcherActs = (S.nightActions || []).filter(a => {
+    if (!a || !a.targetId) return false;
     const actor = players.find(p => p.id === a.playerId);
-    return actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') && a.targetId;
+    return !!actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER');
   });
 
-  watcherActs.forEach(a => {
+  // aynı watcher birden fazla kayıt girdiyse tek kez not yaz
+  const seen = new Set();
+  for (const a of watcherActs) {
+    if (seen.has(a.playerId)) continue;
+    seen.add(a.playerId);
+
     const actor = players.find(p => p.id === a.playerId);
-    if (!actor) return;
+    if (!actor) continue;
+
     const blocked = blockedPlayers.has(actor.id);
     const t = players.find(p => p.id === a.targetId);
     const tName = t ? t.name : 'hedef';
+
     if (blocked) {
-      S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []),
-        `${S.currentTurn}. Gece: ${tName} üzerinde gözcülük yapamadın (tutuldun).`
+      S.playerNotes[actor.id] = [
+        ...(S.playerNotes[actor.id] || []),
+        `${S.currentTurn}. Gece: ${tName} üzerinde gözcülük yapamadın (tutuldun).`,
       ];
-      return;
+      continue;
     }
-    const set = new Set([...(trueVisitorsByTarget[a.targetId] || new Set())]);
+
+    // ziyaretçi isimlerini toparla (kendini listeden çıkar)
+    const set = new Set([...(trueVisitorsByTarget.get(a.targetId) || new Set())]);
     set.delete(actor.id);
     const names = Array.from(set).map(pid => (players.find(p => p.id === pid)?.name || 'biri'));
-    const line = names.length === 0
-      ? `${S.currentTurn}. Gece: ${tName} yanına kimse gitmedi.`
-      : (names.length === 1
-          ? `${S.currentTurn}. Gece: ${tName} yanına ${names[0]} gitti.`
-          : `${S.currentTurn}. Gece: ${tName} yanına ${names.slice(0, -1).join(', ')} ve ${names.slice(-1)} gitti.`);
-    S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), line];
-  });
+
+    let line;
+    if (names.length === 0) {
+      line = `${S.currentTurn}. Gece: ${tName} yanına kimse gitmedi.`;
+    } else if (names.length === 1) {
+      line = `${S.currentTurn}. Gece: ${tName} yanına ${names[0]} gitti.`;
+    } else {
+      line = `${S.currentTurn}. Gece: ${tName} yanına ${names.slice(0, -1).join(', ')} ve ${names[names.length - 1]} gitti.`;
+    }
+
+    S.playerNotes[actor.id] = [ ...(S.playerNotes[actor.id] || []), line ];
+  }
 })();
+
 //dedective
 
 
