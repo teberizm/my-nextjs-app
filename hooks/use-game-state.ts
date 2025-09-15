@@ -52,7 +52,15 @@ export function useGameState(currentPlayerId: string): GameStateHook {
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [voteCount, setVoteCount] = useState<Record<string, number>>({});
   const [phaseEndsAt, setPhaseEndsAt] = useState<number>(0);
+  const [secretMsgReq, setSecretMsgReq] = useState<null | {
+  actorId: string;
+  turn: number;
+  targets: { id: string; name: string }[];
+}>(null);
 
+const submitSecretMessage = (targetId: string, text: string) => {
+  wsClient.sendEvent("SUBMIT_SECRET_MESSAGE" as any, { targetId, text });
+};
   const [currentTurn, setCurrentTurn] = useState(1);
   const [nightActions, setNightActions] = useState<NightAction[]>([]);
   const [votes, setVotes] = useState<Record<string, string>>({});
@@ -208,7 +216,16 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     wsClient.on("NOTES_UPDATED", onNotes);
     wsClient.on("SETTINGS_UPDATED", onSettingsUpdated); // <-- doğru kanal
     wsClient.on("RESET_GAME", onReset);
+    wsClient.on("SECRET_MESSAGE_REQUEST", (data: any) => {
+  const p = data?.payload;
+  if (!p) return;
+  setSecretMsgReq(p);
+});
 
+wsClient.on("SECRET_MESSAGE_RESULT", (data: any) => {
+  // Başarılı/başarısız fark etmez; modalı kapat
+  setSecretMsgReq(null);
+});
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
 
     return () => {
@@ -220,6 +237,8 @@ export function useGameState(currentPlayerId: string): GameStateHook {
       wsClient.off("NOTES_UPDATED", onNotes);
       wsClient.off("SETTINGS_UPDATED", onSettingsUpdated); // <-- cleanup'ta da aynı handler
       wsClient.off("RESET_GAME", onReset);
+      wsClient.off("SECRET_MESSAGE_REQUEST", /* aynı handler referansı */);
+      wsClient.off("SECRET_MESSAGE_RESULT", /* aynı handler referansı */);
     };
   }, [resetGame]);
 
@@ -329,5 +348,7 @@ export function useGameState(currentPlayerId: string): GameStateHook {
     submitNightAction,
     submitVote,
     resetGame,
+    secretMsgReq,
+    submitSecretMessage,
   };
 }
