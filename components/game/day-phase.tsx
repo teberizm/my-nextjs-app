@@ -104,22 +104,31 @@ export function DayPhase({
   }, []);
 
   function renderNote(line: string) {
-    // "[[secret:<fromId>:<fromName>]] mesaj"
-    const m = line.match(/^\d+\. (Gün|Gece): \[\[secret:([^:]+):([^\]]+)\]\]\s*(.+)$/);
-    if (m) {
-      const fromName = m[3];
-      const text = m[4];
-      return (
-        <div className="p-2 rounded-md border border-fuchsia-400/50 bg-fuchsia-400/10">
-          <div className="text-xs uppercase tracking-wide text-fuchsia-400 mb-1">
-            Gizli mesaj — {fromName}
-          </div>
-          <div>{text}</div>
+  // [[secret:<fromId>]] veya [[secret:<fromId>:<fromName>]]
+  const m = line.match(/^\d+\. (Gün|Gece): \[\[secret:([^:\]]+)(?::([^\]]+))?\]\]\s*(.+)$/);
+  if (m) {
+    const fromId = m[2];
+    const providedName = m[3];          // varsa, sunucunun koyduğu isim
+    const text = m[4];
+
+    // allPlayers'tan gerçek adı çöz
+    const sender = (typeof fromId === 'string')
+      ? (/* DayPhase props'undaki listeyi kullanıyoruz */ (Array.isArray(allPlayers) ? allPlayers : [])).find(p => p.id === fromId)
+      : undefined;
+
+    const fromName = sender?.name || providedName || "Biri";
+
+    return (
+      <div className="p-2 rounded-md border border-fuchsia-400/50 bg-fuchsia-400/10">
+        <div className="text-xs uppercase tracking-wide text-fuchsia-400 mb-1">
+          Gizli mesaj — {fromName}
         </div>
-      );
-    }
-    return <div>{line}</div>;
+        <div>{text}</div>
+      </div>
+    );
   }
+  return <div>{line}</div>;
+}
 
   return (
     <>
