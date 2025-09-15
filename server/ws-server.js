@@ -758,11 +758,6 @@ function processNightActions(roomId) {
       const target = players.find((p) => p.id === a.targetId);
 
       if (!actor) return;
-      if (blockedPlayers.has(actor.id)) {
-        if (actor.role === 'DOCTOR') doctorResults.set(actor.id, { success: false });
-        return;
-      }
-
       if ((actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') && a.targetId) {
         // already handled as block
       } else if (actor.role === 'SURVIVOR') {
