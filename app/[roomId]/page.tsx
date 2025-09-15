@@ -8,25 +8,7 @@ import { wsClient } from "@/lib/websocket-client";
 import type { Room, Player, GameSettings, GamePhase } from "@/lib/types";
 import { startWakeLock, stopWakeLock } from "@/lib/wakeLock";
 const ROOM_PASSWORD = "1234";
-useEffect(() => {
-  // kullanıcı ilk kez bir yere tıklayınca ekran kapanmasını engelle
-  const once = async () => {
-    if (!(window as any).__wakeOn__) {
-      try { await startWakeLock(); } catch {}
-    }
-    document.removeEventListener("click", once, true);
-    document.removeEventListener("touchstart", once, true);
-  };
-  document.addEventListener("click", once, true);
-  document.addEventListener("touchstart", once, true);
-
-  return () => {
-    // sayfadan ayrılırken kapat (oyun reset vs.)
-    try { stopWakeLock(); } catch {}
-    document.removeEventListener("click", once, true);
-    document.removeEventListener("touchstart", once, true);
-  };
-}, []);
+ 
 export default function RoomPage({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
 
@@ -211,7 +193,25 @@ export default function RoomPage({ params }: { params: { roomId: string } }) {
   }
 
   const isLobby = gamePhase === "LOBBY";
+  useEffect(() => {
+  // kullanıcı ilk kez bir yere tıklayınca ekran kapanmasını engelle
+  const once = async () => {
+    if (!(window as any).__wakeOn__) {
+      try { await startWakeLock(); } catch {}
+    }
+    document.removeEventListener("click", once, true);
+    document.removeEventListener("touchstart", once, true);
+  };
+  document.addEventListener("click", once, true);
+  document.addEventListener("touchstart", once, true);
 
+  return () => {
+    // sayfadan ayrılırken kapat (oyun reset vs.)
+    try { stopWakeLock(); } catch {}
+    document.removeEventListener("click", once, true);
+    document.removeEventListener("touchstart", once, true);
+  };
+}, []);
   return (
     <>
       {isLobby ? (
