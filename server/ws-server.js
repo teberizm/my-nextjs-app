@@ -626,7 +626,7 @@ function generateFakeForDeli(room) {
     S.playerNotes[pid] = [...(S.playerNotes[pid] || []), text];
   };
 
-  // Build 'true visitors' per target from all actions (for WATCHER lies)
+  // WATCHER sahte notu üretirken "gerçek ziyaretçileri" dışarıda bırakmak için
   const trueVisitorsByTarget = {};
   (S.nightActions || []).forEach(a => {
     if (!a || !a.targetId) return;
@@ -634,7 +634,7 @@ function generateFakeForDeli(room) {
     trueVisitorsByTarget[a.targetId].add(a.playerId);
   });
 
-  // DELI actors who submitted an action with a target
+  // DELI oyuncularının, hedefli aksiyonlarını topla
   const deliActions = (S.nightActions || []).filter(a => {
     if (!a || !a.targetId) return false;
     const actor = players.find(p => p.id === a.playerId);
@@ -645,57 +645,71 @@ function generateFakeForDeli(room) {
     const actor = players.find(p => p.id === a.playerId);
     const target = players.find(p => p.id === a.targetId);
     if (!actor || !target) return;
+
     const turn = S.currentTurn;
     const emu = actor.displayRole; // DOCTOR | GUARDIAN | WATCHER | DETECTIVE
 
     if (emu === 'DOCTOR') {
-  const variants = [
-    `${turn}. Gece: ${target.name} kişisini iyileştirdin.`,
-    `${turn}. Gece: ${target.name} kişisine gittin ama bir şey olmadı.`
-  ];
-  addNote(actor.id, variants[Math.floor(Math.random() * variants.length)]);
-} else if (emu === 'GUARDIAN') {
-  addNote(actor.id, `${turn}. Gece: ${target.name} kişisini tuttun (aksiyonunu kilitledin).`);
-} else if (emu === 'WATCHER') {
-  // gerçek ziyaretçileri havuz dışı bırak → bilinçli yanlış bilgi
-  const trueSet = new Set(Array.from((trueVisitorsByTarget[target.id] || new Set()).values()));
-  const pool = alive.filter(p => p.id !== actor.id && p.id !== target.id && !trueSet.has(p.id));
+      // Rastgele "iyileştirdin" veya "gittin ama bir şey olmadı"
+      const variants = [
+        `${turn}. Gece: ${target.name} kişisini iyileştirdin.`,
+        `${turn}. Gece: ${target.name} kişisine gittin ama bir şey olmadı.`
+      ];
+      addNote(actor.id, variants[Math.floor(Math.random() * variants.length)]);
 
-  // 0, 1 veya 2 sahte ziyaretçi → tamamen rastgele
-  const maxPick = Math.min(pool.length, 2);
-  const choices = [0, 1, 2].filter(n => n <= maxPick);
-  const n = choices[Math.floor(Math.random() * choices.length)];
+    } else if (emu === 'GUARDIAN') {
+      addNote(actor.id, `${turn}. Gece: ${target.name} kişisini tuttun (aksiyonunu kilitledin).`);
 
-  // benzersiz n kişi seç
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  const picked = shuffled.slice(0, n);
-  const names = picked.map(p => p.name);
+    } else if (emu === 'WATCHER') {
+      // Gerçek ziyaretçileri havuzdan çıkar → bilinçli yanlış bilgi
+      const trueSet = new Set(Array.from((trueVisitorsByTarget[target.id] || new Set()).values()));
+      const pool = alive.filter(p => p.id !== actor.id && p.id !== target.id && !trueSet.has(p.id));
 
-  let line;
-  if (names.length === 0) {
-    line = `${turn}. Gece: ${target.name} kişisine kimse gelmedi.`;
-  } else if (names.length === 1) {
-    line = `${turn}. Gece: ${target.name} kişisine ${names[0]} gitti.`;
-  } else {
-    line = `${turn}. Gece: ${target.name} kişisine ${names[0]} ve ${names[1]} gitti.`;
-  }
-  addNote(actor.id, line);
-}else if (emu === 'DETECTIVE') {else if (emu === 'DETECTIVE') {
-  // Hedefin gerçek rolünü hariç tutarak iki farklı rastgele rol seç
-  const ROLE_POOL = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR','EVIL_GUARDIAN','EVIL_WATCHER','EVIL_DETECTIVE'];
-  const pool = ROLE_POOL.filter(r => r !== target.role);
-  const pick = () => pool[Math.floor(Math.random() * pool.length)];
-  const r1 = pick();
-  let r2 = pick();
-  if (r2 === r1) {
-    r2 = pool[(pool.indexOf(r1) + 1) % pool.length];
-  }
-  addNote(actor.id, `${turn}. Gece: ${target.name}, ${roleTR(r1)} veya ${roleTR(r2)} olabilir.`);
-} else {
+      // 0, 1 veya 2 sahte ziyaretçi → tamamen rastgele
+      const maxPick = Math.min(pool.length, 2);
+      const choices = [0, 1, 2].filter(n => n <= maxPick);
+      const n = choices[Math.floor(Math.random() * choices.length)];
+
+      // benzersiz n kişi seç
+      const shuffled = [...pool].sort(() => Math.random() - 0.5);
+      const picked = shuffled.slice(0, n);
+      const names = picked.map(p => p.name);
+
+      let line;
+      if (names.length === 0) {
+        line = `${turn}. Gece: ${target.name} kişisine kimse gelmedi.`;
+      } else if (names.length === 1) {
+        line = `${turn}. Gece: ${target.name} kişisine ${names[0]} gitti.`;
+      } else {
+        line = `${turn}. Gece: ${target.name} kişisine ${names[0]} ve ${names[1]} gitti.`;
+      }
+      addNote(actor.id, line);
+
+    } else if (emu === 'DETECTIVE') {
+      // Hedefin GERÇEK rolünü hariç tutarak iki farklı RASTGELE rol öner
+      const ROLE_POOL = [
+        'DOCTOR','GUARDIAN','WATCHER','DETECTIVE',
+        'BOMBER','SURVIVOR','EVIL_GUARDIAN','EVIL_WATCHER','EVIL_DETECTIVE'
+      ];
+      const pool = ROLE_POOL.filter(r => r !== target.role);
+      const pick = () => pool[Math.floor(Math.random() * pool.length)];
+      const r1 = pick();
+      let r2 = pick();
+      if (r2 === r1) r2 = pool[(pool.indexOf(r1) + 1) % pool.length];
+
+      // roleTR varsa kullanıyoruz (dosyada global fonksiyon). Yoksa r1/r2 olduğu gibi kalır.
+      const t1 = (typeof roleTR === 'function') ? roleTR(r1) : r1;
+      const t2 = (typeof roleTR === 'function') ? roleTR(r2) : r2;
+
+      addNote(actor.id, `${turn}. Gece: ${target.name}, ${t1} veya ${t2} olabilir.`);
+
+    } else {
+      // Güvenli varsayılan
       addNote(actor.id, `${turn}. Gece: ${target.name} üzerinde bir hareket yaptın.`);
     }
   });
 }
+
 
 function processNightActions(roomId) {
   const room = rooms.get(roomId);
