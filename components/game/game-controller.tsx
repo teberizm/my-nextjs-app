@@ -45,6 +45,8 @@ export function GameController({
     deathLog,
     bombTargets,
     playerNotes,
+    secretMsgReq,
+    submitSecretMessage,
   } = useGameState(currentPlayerId);
 
   const isOwnerFromInitial = useMemo(() => {
@@ -156,6 +158,8 @@ export function GameController({
           currentTurn={currentTurn}
           playerNotes={playerNotes}
           deaths={deathLog}
+          secretMsgReq={secretMsgReq}
+          onSubmitSecretMessage={submitSecretMessage}
         />
       );
 
