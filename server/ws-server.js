@@ -879,8 +879,44 @@ function processNightActions(roomId) {
     S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), line];
   });
 })();
+//dedective
+
+
+  // === REAL DETECTIVE RESULTS (gerçek rol + rastgele başka bir rol) ===
 (() => {
-  const isEvil = (role) => ['BOMBER','EVIL_GUARDIAN','EVIL_WATCHER','EVIL_DETECTIVE'].includes(role);
+  const roleLabel = (role) => {
+    switch (role) {
+      case 'WATCHER': return 'Gözcü';
+      case 'EVIL_WATCHER': return 'Hain Gözcü';
+      case 'DETECTIVE': return 'Dedektif';
+      case 'EVIL_DETECTIVE': return 'Hain Dedektif';
+      case 'GUARDIAN': return 'Gardiyan';
+      case 'EVIL_GUARDIAN': return 'Hain Gardiyan';
+      case 'DOCTOR': return 'Doktor';
+      case 'BOMBER': return 'Bombacı';
+      case 'SURVIVOR': return 'Hayatta Kalıcı';
+      default: return 'Bilinmeyen Rol';
+    }
+  };
+
+  // Havuz: sahte aday burada rastgele seçilir (gerçek rol HARİÇ)
+  const ROLE_POOL = [
+    'WATCHER', 'EVIL_WATCHER',
+    'DETECTIVE', 'EVIL_DETECTIVE',
+    'GUARDIAN', 'EVIL_GUARDIAN',
+    'DOCTOR',
+    'BOMBER',
+    'SURVIVOR',
+  ];
+
+  // Havuzdan, gerçek role eşit olmayan rastgele bir rol çek
+  const pickRandomOtherRole = (trueRole) => {
+    const pool = ROLE_POOL.filter(r => r !== trueRole);
+    if (pool.length === 0) return null;
+    const idx = Math.floor(Math.random() * pool.length);
+    return pool[idx];
+  };
+
   const detectiveActs = (S.nightActions || []).filter(a => {
     const actor = players.find(p => p.id === a.playerId);
     return actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') && a.targetId;
@@ -889,9 +925,11 @@ function processNightActions(roomId) {
   detectiveActs.forEach(a => {
     const actor = players.find(p => p.id === a.playerId);
     if (!actor) return;
+
     const blocked = blockedPlayers.has(actor.id);
     const t = players.find(p => p.id === a.targetId);
     const tName = t ? t.name : 'hedef';
+
     if (blocked) {
       S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []),
         `${S.currentTurn}. Gece: ${tName} için soruşturma yapamadın (tutuldun).`
@@ -899,12 +937,22 @@ function processNightActions(roomId) {
       return;
     }
     if (!t) return;
-    const hint = isEvil(t.role) ? 'hain gibi' : 'masuma benziyor';
-    S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []),
-      `${S.currentTurn}. Gece: ${tName} ${hint}.`
+
+    // 1) GERÇEK rol etiketi
+    const trueLbl = roleLabel(t.role);
+
+    // 2) RASTGELE farklı bir rol etiketi
+    const fakeRole = pickRandomOtherRole(t.role);
+    const fakeLbl = roleLabel(fakeRole || 'SURVIVOR'); // emniyetli fallback
+
+    // Çıkış: "X, [GerçekRol] veya [Rastgele Rol] olabilir."
+    S.playerNotes[actor.id] = [
+      ...(S.playerNotes[actor.id] || []),
+      `${S.currentTurn}. Gece: ${tName} ${trueLbl} veya ${fakeLbl} olabilir.`,
     ];
   });
 })();
+
   // 5) Bomb detonate victims (per owner; no chain detonation)
   let bombVictims = [];
   detonateActions.forEach((det) => {
