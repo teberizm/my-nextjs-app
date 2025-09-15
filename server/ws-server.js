@@ -744,6 +744,7 @@ function processNightActions(roomId) {
   // 3) Doctor, Survivor, other protects
   const revived = new Set();
   const doctorResults = new Map();
+  const doctorTargetsByActor = new Map(); // 🆕 Doktor → hedef eşlemi
   const protectedPlayers = new Set();
   const survivorActors = new Set();
 
@@ -774,15 +775,21 @@ function processNightActions(roomId) {
           S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
         }
       } else if (actor.role === 'DOCTOR') {
-        if (blockedPlayers.has(actor.id)) {
-    doctorResults.set(actor.id, { success: false, blocked: true, targetId: a.targetId || null });
-  } else if (target && (!target.isAlive || adjustedKills.some(k=>k.targetId===target.id))) {
-    revived.add(target.id);
-    doctorResults.set(actor.id, { success: true, targetId: target.id });
-  } else {
-    doctorResults.set(actor.id, { success: false, targetId: a.targetId || null });
+  // Engellendiyse burada sadece "blocked" bilgisini kaydet, karar verme
+  if (blockedPlayers.has(actor.id)) {
+    doctorResults.set(actor.id, { blocked: true, targetId: target ? target.id : (a?.targetId ?? null) });
+    return;
   }
-      } else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
+  if (!target) {
+    doctorResults.set(actor.id, { blocked: false, targetId: null }); // hedef yok
+    return;
+  }
+  // Kararı ŞİMDİ verme: finalde (deathMark sonrası) uygulayacağız
+  doctorTargetsByActor.set(actor.id, target.id); // doktor -> hedef
+  revived.add(target.id);                         // bu tur sonunda yaşatmayı dene
+  doctorResults.set(actor.id, { pending: true, targetId: target.id }); // uyumluluk için
+}
+      else if (a.targetId && actor.role !== 'DELI') { protectedPlayers.add(a.targetId); }
     });
   doctorResults.forEach((res, docId) => {
   const tName = res?.targetId ? (players.find(p => p.id === res.targetId)?.name || 'hedef') : 'hedef';
@@ -1018,7 +1025,41 @@ function processNightActions(roomId) {
     const hasResStone = res && res.playerId === id && res.nightTurn === S.currentTurn;
     if (!hasResStone) deathMark.add(id);
   });
+  const deathMarkBeforeRevive = new Set(deathMark); // not için referans
+  revived.forEach(pid => deathMark.delete(pid));    // doktor hedefleri ölmesin
 
+  doctorTargetsByActor.forEach((targetId, docId) => {
+  const t = room.players.get(targetId);
+  const tName = t ? t.name : 'hedef';
+  const wasDying = deathMarkBeforeRevive.has(targetId); // doktor olmasa ölecek miydi?
+
+  const blocked = doctorResults.get(docId)?.blocked === true;
+  if (blocked) {
+    S.playerNotes[docId] = [
+      ...(S.playerNotes[docId] || []),
+      `${S.currentTurn}. Gece: ${tName} için iyileştirme yapamadın (tutuldun).`,
+    ];
+    doctorResults.set(docId, { success: false, blocked: true, targetId });
+    return;
+  }
+
+  if (wasDying) {
+    S.playerNotes[docId] = [
+      ...(S.playerNotes[docId] || []),
+      `${S.currentTurn}. Gece: ${tName} oyuncusunu kurtardın.`,
+    ];
+    doctorResults.set(docId, { success: true, blocked: false, targetId });
+  } else {
+    S.playerNotes[docId] = [
+      ...(S.playerNotes[docId] || []),
+      `${S.currentTurn}. Gece: ${tName} için gittin; saldırı yoktu veya kurtarma gerekmedi.`,
+    ];
+    doctorResults.set(docId, { success: false, blocked: false, targetId });
+  }
+});
+
+
+  
   const newDeaths = [];
   Array.from(newPlayersMap.values()).forEach((p) => {
     if (deathMark.has(p.id)) {
