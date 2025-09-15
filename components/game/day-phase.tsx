@@ -104,31 +104,35 @@ export function DayPhase({
   }, []);
 
   function renderNote(line: string) {
-  // [[secret:<fromId>]] veya [[secret:<fromId>:<fromName>]]
+  // [[secret:<fromId>]] veya [[secret:<fromId>:<fromName>]] + mesaj
   const m = line.match(/^\d+\. (Gün|Gece): \[\[secret:([^:\]]+)(?::([^\]]+))?\]\]\s*(.+)$/);
-  if (m) {
-    const fromId = m[2];
-    const providedName = m[3];          // varsa, sunucunun koyduğu isim
-    const text = m[4];
+  if (!m) return <div>{line}</div>;
 
-    // allPlayers'tan gerçek adı çöz
-    const sender = (typeof fromId === 'string')
-      ? (/* DayPhase props'undaki listeyi kullanıyoruz */ (Array.isArray(allPlayers) ? allPlayers : [])).find(p => p.id === fromId)
-      : undefined;
+  const fromId = m[2];
+  const providedName = m[3];   // varsa server'ın koyduğu isim
+  const text = m[4];
 
-    const fromName = sender?.name || providedName || "Biri";
+  // fromId'den gerçek adı çöz
+  const sender = allPlayers.find(p => p.id === fromId);
+  const fromName = sender?.name || providedName || "Biri";
 
-    return (
-      <div className="p-2 rounded-md border border-fuchsia-400/50 bg-fuchsia-400/10">
-        <div className="text-xs uppercase tracking-wide text-fuchsia-400 mb-1">
-          Gizli mesaj — {fromName}
-        </div>
-        <div>{text}</div>
+  // Görünüm anahtarı: "short" → `2: mesaj`, "long" → `2'nin gizli mesajı: mesaj`
+  const STYLE: "short" | "long" = "short";
+
+  const label = STYLE === "long"
+    ? `${fromName}:`
+    : `${fromName}'nin gizli mesajı:`;
+
+  // İstersen kutuyu sadeleştir veya tamamen <div>{label} {text}</div> yap
+  return (
+    <div className="p-2 rounded-md border border-fuchsia-400/50 bg-fuchsia-400/10">
+      <div className="font-semibold">
+        {label} {text}
       </div>
-    );
-  }
-  return <div>{line}</div>;
+    </div>
+  );
 }
+
 
   return (
     <>
