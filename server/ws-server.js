@@ -894,7 +894,7 @@ function processNightActions(roomId) {
       case 'EVIL_GUARDIAN': return 'Hain Gardiyan';
       case 'DOCTOR': return 'Doktor';
       case 'BOMBER': return 'Bombacı';
-      case 'SURVIVOR': return 'Hayatta Kalıcı';
+      case 'SURVIVOR': return 'Survivor';
       default: return 'Bilinmeyen Rol';
     }
   };
