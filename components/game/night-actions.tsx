@@ -59,14 +59,18 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
     </Card>
   )
   let alivePlayers = allPlayers.filter((p) => {
-    if (!p.isAlive || p.id === currentPlayer.id) return false
-    // Traitors cannot target other traitors
-    if (mode === "KILL" && isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
-    return true
-  })
-  if (visibleRole === "BOMBER") {
-    alivePlayers = alivePlayers.filter((p) => !bombTargets.includes(p.id))
-  }
+  if (!p.isAlive || p.id === currentPlayer.id) return false
+  if (mode === "KILL" && isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
+  return true
+})
+
+const alreadyBombed = new Set(bombTargets || [])
+
+if (visibleRole === "BOMBER") {
+  alivePlayers = alivePlayers.filter((p) => !alreadyBombed.has(p.id))
+}
+
+const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
   const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
 
   function handleSubmitAction() {
@@ -357,38 +361,44 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
         </Card>
 
         {/* Action Button */}
-        <div className="space-y-3">
-          <Button
-            onClick={handleSubmitAction}
-            disabled={!selectedTarget}
-            className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
-          >
-            {getActionIcon()}
-            <span className="ml-2">
-              {visibleRole === "BOMBER" ? "Bombayı Yerleştir" : "Aksiyonu Gönder"}
-            </span>
-          </Button>
-
-          {visibleRole === "BOMBER" && (
-            <Button
-              onClick={() => {
-                onSubmitAction(null, "BOMB_DETONATE")
-                setActionSubmitted(true)
-              }}
-              variant="destructive"
-              className="w-full"
-            >
-              Bombaları Patlat
-            </Button>
-          )}
-
-          {isTraitorRole(currentPlayer.role!) && mode === "KILL" && (
-            <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">
-              Bu Gece Kimseyi Öldürme
-            </Button>
-          )}
-        </div>
-      </div>
+        YENİ
+<div className="space-y-3">
+  {visibleRole === "BOMBER" && bomberNoTargetLeft && (
+    <div className="text-sm text-muted-foreground px-2">
+      Bu gece yerleştirecek hedef kalmadı (tüm canlı hedeflerde zaten bomban var).
+      İstersen <strong>Bombaları Patlat</strong> butonunu kullanabilirsin.
     </div>
+  )}
+
+  <Button
+    onClick={handleSubmitAction}
+    disabled={!selectedTarget || (visibleRole === "BOMBER" && bomberNoTargetLeft)}
+    className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
+  >
+    {getActionIcon()}
+    <span className="ml-2">
+      {visibleRole === "BOMBER" ? "Bombayı Yerleştir" : "Aksiyonu Gönder"}
+    </span>
+  </Button>
+
+  {visibleRole === "BOMBER" && (
+    <Button
+      onClick={() => {
+        onSubmitAction(null, "BOMB_DETONATE");
+        setActionSubmitted(true);
+      }}
+      variant="destructive"
+      className="w-full"
+    >
+      Bombaları Patlat
+    </Button>
+  )}
+
+  {isTraitorRole(currentPlayer.role!) && mode === "KILL" && (
+    <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">
+      Bu Gece Kimseyi Öldürme
+    </Button>
+  )}
+</div>
   )
 }
