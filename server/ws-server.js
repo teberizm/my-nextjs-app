@@ -334,9 +334,12 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
     }
 
     /* 18 */ case 'AUTO_CONFESS_ROLE': {
-      if (actor) addNote(actorId, `${S.currentTurn}. Gün: GERÇEK rolün: ${roleTR(actor.role)}`);
-      return { ok:true, title, desc };
-    }
+  if (actor) {
+    const line = `${S.currentTurn}. Gün: ${actor.name} GERÇEK rolü: ${roleTR(actor.role)}`;
+    Array.from(room.players.keys()).forEach(pid => addNote(pid, line));
+  }
+  return { ok:true, title, desc };
+}
 
     /* 14 */ case 'PUBLIC_ROLE_HINT': {
       const roles = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE','BOMBER','SURVIVOR'];
@@ -345,14 +348,28 @@ function applyCardEffect(room, actorId, effectId, extra = {}) {
       return { ok:true, title, desc };
     }
 
-    /* 15 */ case 'SECRET_MESSAGE_TO_RANDOM': {
-      const alive = alivePlayers();
-      if (!alive.length) return { ok:false, note:'Canlı yok' };
-      const t = randPick(alive);
-      addNote(actorId, `${S.currentTurn}. Gün: ${t.name} oyuncusuna gizli mesaj: (notlara bak)`);
-      addNote(t.id, `${S.currentTurn}. Gün: Hain tahmininden daha da yakın.`);
-      return { ok:true, targetId:t.id, title, desc };
-    }
+   /* 15 */ case 'SECRET_MESSAGE_TO_RANDOM': {
+  const alive = alivePlayers().filter(p => p.id !== actorId);
+  if (!alive.length) return { ok:false, note:'Canlı yok' };
+
+  // Bu tura özel istek oluştur (gündüz boyunca geçerli olsun)
+  S.secretMessageRequests = S.secretMessageRequests || {};
+  S.secretMessageRequests[actorId] = {
+    turn: S.currentTurn,
+    allowedIds: alive.map(p => p.id),
+  };
+
+  // Aktöre hedef listesiyle “mesaj yaz” isteği yayınla (client sadece kendisi için açar)
+  const payload = {
+    actorId,
+    turn: S.currentTurn,
+    targets: alive.map(p => ({ id: p.id, name: p.name })),
+  };
+  broadcast(room, 'SECRET_MESSAGE_REQUEST', payload);
+
+  addNote(actorId, `${S.currentTurn}. Gün: Gizli mesaj kartı aktif. Birini seçip mesaj yazabilirsin.`);
+  return { ok:true, title, desc };
+}
 
     /* 3 */ case 'HINT_PARTIAL_ROLE': {
       const alive = alivePlayers().filter(p=>p.id!==actorId);
@@ -1518,6 +1535,7 @@ wss.on('connection', (ws) => {
               currentCardDrawer: null,
               // pending card
               pendingCard: null,
+              secretMessageRequests: {},  // (15) gizli mesaj modali için bekleyen istekler
             },
             timer: null,
             ownerId: null,
@@ -1700,7 +1718,56 @@ wss.on('connection', (ws) => {
         broadcastSnapshot(rid);
         break;
       }
+      case 'SUBMIT_SECRET_MESSAGE': {
+  const room = rooms.get(rid);
+  if (!room) break;
 
+  const S = room.state;
+  const actorId = ws.playerId;
+  const { targetId, text } = payload || {};
+
+  const reqs = S.secretMessageRequests || {};
+  const req = reqs[actorId];
+
+  // Geçerleme: istek bu turdan mı ve hedef havuzda mı?
+  if (!req || req.turn !== S.currentTurn) {
+    ws.send(JSON.stringify({ type:'SECRET_MESSAGE_RESULT', payload:{ ok:false, error:'İstek bulunamadı ya da süresi geçti' } }));
+    break;
+  }
+  if (!targetId || !req.allowedIds.includes(targetId)) {
+    ws.send(JSON.stringify({ type:'SECRET_MESSAGE_RESULT', payload:{ ok:false, error:'Geçersiz hedef' } }));
+    break;
+  }
+
+  const target = room.players.get(targetId);
+  if (!target || !target.isAlive) {
+    ws.send(JSON.stringify({ type:'SECRET_MESSAGE_RESULT', payload:{ ok:false, error:'Hedef uygun değil' } }));
+    break;
+  }
+
+  const clean = String(text || '').trim().replace(/\s+/g,' ').slice(0, 280);
+  if (!clean) {
+    ws.send(JSON.stringify({ type:'SECRET_MESSAGE_RESULT', payload:{ ok:false, error:'Mesaj boş' } }));
+    break;
+  }
+
+  const actor = room.players.get(actorId);
+  const line = `${S.currentTurn}. Gün: [[secret:${actorId}:${actor?.name||'Biri'}]] ${clean}`;
+
+  // Notu hedefe düş
+  S.playerNotes[targetId] = [...(S.playerNotes[targetId] || []), line];
+
+  // İsteği kapat
+  delete reqs[actorId];
+
+  // Aktöre sonuç bildir
+  ws.send(JSON.stringify({ type:'SECRET_MESSAGE_RESULT', payload:{ ok:true, targetId } }));
+
+  // Snapshot yayınla (client notları güncellesin)
+  const snap = snapshotRoom(rid);
+  broadcast(room, 'STATE_SNAPSHOT', { roomId: rid, state: snap });
+  break;
+}
       /* ---------- Card drawing flow ---------- */
       case 'CARD_QR_SCANNED': {
         const room = rooms.get(rid);
