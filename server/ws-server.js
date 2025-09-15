@@ -533,11 +533,11 @@ function getWinCondition(players, loversPairs) {
 
   // YENİ KURAL: Son 2 kişi hayattaysa ve aralarında tam 1 Bombacı varsa → Bombacı kazanır
   if (alive.length === 2) {
-    const bomberCount = bombers.length;
-    if (bomberCount === 1) {
-      return { winner: 'BOMBER', gameEnded: true };
-    }
+  const bomberCount = bombers.length;
+  if (bomberCount >= 1) { // ⬅️ 1 veya 2 bombacı
+    return { winner: 'BOMBER', gameEnded: true };
   }
+}
 
   // Tek başına kalan Bombacı → kazanır
   if (alive.length === 1 && alive[0].role === 'BOMBER') {
@@ -800,14 +800,41 @@ function processNightActions(roomId) {
       if ((actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') && a.targetId) {
         // already handled as block
       } else if (actor.role === 'SURVIVOR') {
-        if (actor.survivorShields && actor.survivorShields > 0 && a.targetId === actor.id) {
-          protectedPlayers.add(actor.id);
-          survivorActors.add(actor.id);
-          const remaining = Math.max((actor.survivorShields || 0) - 1, 0);
-          // note
-          const note = `${S.currentTurn}. Gece: Kendini korudun (${remaining} hak kaldı)`;
-          S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
-        }
+  // ⛔️ Bloklandıysa koruyamasın
+  if (blockedPlayers.has(actor.id)) {
+    S.playerNotes[actor.id] = [
+      ...(S.playerNotes[actor.id] || []),
+      `${S.currentTurn}. Gece: Kendini koruyamadın (tutuldun).`,
+    ];
+    return;
+  }
+
+  // 🔒 Yalnızca kendini koruyabilir
+  if (a.targetId !== actor.id) {
+    S.playerNotes[actor.id] = [
+      ...(S.playerNotes[actor.id] || []),
+      `${S.currentTurn}. Gece: Sadece kendini koruyabilirsin.`,
+    ];
+    return;
+  }
+
+  const shields = actor.survivorShields || 0;
+  if (shields <= 0) {
+    S.playerNotes[actor.id] = [
+      ...(S.playerNotes[actor.id] || []),
+      `${S.currentTurn}. Gece: Koruma hakkın yoktu.`,
+    ];
+    return;
+  }
+
+  // ✅ Başarılı koruma: bu tur kalkan + hak düşürme işaretle
+  protectedPlayers.add(actor.id);
+  survivorActors.add(actor.id);
+  const remaining = Math.max(shields - 1, 0);
+  S.playerNotes[actor.id] = [
+    ...(S.playerNotes[actor.id] || []),
+    `${S.currentTurn}. Gece: Kendini korudun (${remaining} hak kaldı)`,
+  ];
       } else if (actor.role === 'DOCTOR') {
   // Engellendiyse burada sadece "blocked" bilgisini kaydet, karar verme
      if (blockedPlayers.has(actor.id)) {
@@ -836,12 +863,34 @@ function processNightActions(roomId) {
   }
 
   // Bombs (per-owner)
-  const bombPlacers = S.nightActions.filter(
-    (a) => a.actionType === 'BOMB_PLANT' && !blockedPlayers.has(a.playerId),
-  );
-  const detonateActions = S.nightActions.filter(
-    (a) => a.actionType === 'BOMB_DETONATE' && !blockedPlayers.has(a.playerId),
-  );
+ const bombPlacers = S.nightActions.filter(
+  (a) => a.actionType === 'BOMB_PLANT' && !blockedPlayers.has(a.playerId),
+);
+const detonateActions = S.nightActions.filter(
+  (a) => a.actionType === 'BOMB_DETONATE' && !blockedPlayers.has(a.playerId),
+);
+
+// ⬇️ Bloklanan bombacıya bilgilendirici not (plant/detonate)
+const blockedBombPlacers = S.nightActions.filter(
+  (a) => a.actionType === 'BOMB_PLANT' && blockedPlayers.has(a.playerId)
+);
+blockedBombPlacers.forEach((a) => {
+  const tName = (players.find(p => p.id === a.targetId)?.name) || 'bir oyuncu';
+  S.playerNotes[a.playerId] = [
+    ...(S.playerNotes[a.playerId] || []),
+    `${S.currentTurn}. Gece: ${tName} üzerine bomba yerleştiremedin (tutuldun).`,
+  ];
+});
+
+const blockedBombDetonators = S.nightActions.filter(
+  (a) => a.actionType === 'BOMB_DETONATE' && blockedPlayers.has(a.playerId)
+);
+blockedBombDetonators.forEach((a) => {
+  S.playerNotes[a.playerId] = [
+    ...(S.playerNotes[a.playerId] || []),
+    `${S.currentTurn}. Gece: bombaları patlatamadın (tutuldun).`,
+  ];
+});
 
   // ensure structure
   let bombsByOwner = { ...(S.bombsByOwner || {}) };
@@ -1072,7 +1121,15 @@ bombPlacers.forEach((a) => {
 bombVictimIds.forEach((id) => {
   const hasResStone = res && res.playerId === id && res.nightTurn === S.currentTurn;
   const isProtected = protectedPlayers.has(id);
-
+  if (isProtected) {
+    S.playerNotes[id] = [
+      ...(S.playerNotes[id] || []),
+      `${S.currentTurn}. Gece: bomba saldırısından sağ çıktın (korundun).`,
+    ];
+    return;
+  }
+  if (!hasResStone) deathMark.add(id);
+});
   // Kalkan varsa bomba öldürmesin; oyuncuya bilgi notu düşelim
   if (isProtected) {
     const pl = room.players.get(id);
@@ -1192,12 +1249,16 @@ bombVictimIds.forEach((id) => {
   const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()), (room.state.loversPairs || []));
   if (gameEnded) {
     room.state.game = { ...(room.state.game || {}), endedAt: new Date(), winningSide: winner, loversPairs: (room.state.loversPairs ? [...room.state.loversPairs] : []) };
+    const aliveBombers = Array.from(room.players.values())
+  .filter(p => p.isAlive && p.role === 'BOMBER')
+  .map(p => ({ id: p.id, name: p.name }));
     broadcast(room, 'GAME_ENDED', {
-      winner,
-      loversPairs: room.state.loversPairs || [],
-      loverIds: (room.state.loversPairs || []).flatMap(([a, b]) => [a, b]),
-      turn: room.state.currentTurn,
-    });
+  winner,
+  loversPairs: room.state.loversPairs || [],
+  loverIds: (room.state.loversPairs || []).flatMap(([a, b]) => [a, b]),
+  turn: room.state.currentTurn,
+  bombers: aliveBombers, // ⬅️ ekledik
+});
     startPhase(roomId, 'END', 0);
     return; // oyun bitti, gece sonuçlarına geçme
   }
@@ -1333,13 +1394,38 @@ function advancePhase(roomId) {
   const S = room.state;
   const settings = room.settings || { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 };
 
-  const { winner, gameEnded } = getWinCondition(Array.from(room.players.values()), (room.state && room.state.loversPairs) || []);
-  if (gameEnded && S.phase !== 'END') {
-    S.game = { ...(S.game || {}), endedAt: new Date(), winningSide: winner, loversPairs: (S.loversPairs ? [...S.loversPairs] : []) };
-        broadcast(room, 'GAME_ENDED', { winner, loversPairs: S.loversPairs || [], loverIds: (S.loversPairs || []).flatMap(([a,b]) => [a,b]), turn: S.currentTurn });
-    startPhase(roomId, 'END', 0);
-    return;
+ const { winner, gameEnded } = getWinCondition(
+  Array.from(room.players.values()),
+  (room.state && room.state.loversPairs) || []
+);
+
+if (gameEnded && S.phase !== 'END') {
+  S.game = {
+    ...(S.game || {}),
+    endedAt: new Date(),
+    winningSide: winner,
+    loversPairs: (S.loversPairs ? [...S.loversPairs] : []),
+  };
+
+  // Bombacı kazanmışsa canlı bombacıları listele
+  const payload = {
+    winner,
+    loversPairs: S.loversPairs || [],
+    loverIds: (S.loversPairs || []).flatMap(([a, b]) => [a, b]),
+    turn: S.currentTurn,
+  };
+
+  if (winner === 'BOMBER') {
+    payload.bombers = Array.from(room.players.values())
+      .filter((p) => p.isAlive && p.role === 'BOMBER')
+      .map((p) => ({ id: p.id, name: p.name }));
   }
+
+  broadcast(room, 'GAME_ENDED', payload);
+  startPhase(roomId, 'END', 0);
+  return;
+}
+
 
   switch (S.phase) {
     case 'ROLE_REVEAL':
