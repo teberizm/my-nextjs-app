@@ -1121,6 +1121,7 @@ bombPlacers.forEach((a) => {
 bombVictimIds.forEach((id) => {
   const hasResStone = res && res.playerId === id && res.nightTurn === S.currentTurn;
   const isProtected = protectedPlayers.has(id);
+  // Kalkan varsa bomba öldürmesin; oyuncuya not düş
   if (isProtected) {
     S.playerNotes[id] = [
       ...(S.playerNotes[id] || []),
@@ -1128,24 +1129,13 @@ bombVictimIds.forEach((id) => {
     ];
     return;
   }
-  if (!hasResStone) deathMark.add(id);
-});
-  // Kalkan varsa bomba öldürmesin; oyuncuya bilgi notu düşelim
-  if (isProtected) {
-    const pl = room.players.get(id);
-    S.playerNotes[id] = [
-      ...(S.playerNotes[id] || []),
-      `${S.currentTurn}. Gece: bomba saldırısından sağ çıktın (korundun).`,
-    ];
-    return;
-  }
-
   if (!hasResStone) {
     deathMark.add(id);
   }
 });
-  const deathMarkBeforeRevive = new Set(deathMark); // not için referans
-  revived.forEach(pid => deathMark.delete(pid));    // doktor hedefleri ölmesin
+
+const deathMarkBeforeRevive = new Set(deathMark);
+revived.forEach(pid => deathMark.delete(pid));
 
   doctorTargetsByActor.forEach((targetId, docId) => {
   const t = room.players.get(targetId);
