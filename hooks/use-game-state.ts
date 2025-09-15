@@ -156,7 +156,15 @@ export function useGameState(currentPlayerId: string): GameStateHook {
 
       if (Array.isArray(s.deathsThisTurn)) setDeathsThisTurn(s.deathsThisTurn);
       if (Array.isArray(s.deathLog)) setDeathLog(s.deathLog);
-      if (Array.isArray(s.bombTargets)) setBombTargets(s.bombTargets);
+      if (s.bombsByOwner && typeof s.bombsByOwner === "object") {
+  const mine = (s.bombsByOwner as Record<string, string[]>)[currentPlayerId] || [];
+  setBombTargets(Array.isArray(mine) ? mine : []);
+} else if (Array.isArray(s.bombTargets)) {
+  // Geriye dönük uyumluluk: eski sunucular için
+  setBombTargets(s.bombTargets);
+} else {
+  setBombTargets([]);
+}
       if (s.playerNotes) setPlayerNotes(s.playerNotes);
       if (Array.isArray(s.selectedCardDrawers)) setSelectedCardDrawers(s.selectedCardDrawers);
       if ('currentCardDrawer' in s) setCurrentCardDrawer(s.currentCardDrawer ?? null);
