@@ -1751,8 +1751,7 @@ wss.on('connection', (ws) => {
     break;
   }
 
-  const actor = room.players.get(actorId);
-  const line = `${S.currentTurn}. Gün: [[secret:${actorId}:${actor?.name||'Biri'}]] ${clean}`;
+  const line = `${S.currentTurn}. Gün: [[secret:${actorId}]] ${clean}`;
 
   // Notu hedefe düş
   S.playerNotes[targetId] = [...(S.playerNotes[targetId] || []), line];
