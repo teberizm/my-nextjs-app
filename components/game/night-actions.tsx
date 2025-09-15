@@ -1,40 +1,49 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Moon, Target, Shield, Skull, Eye, Search, Bomb } from "lucide-react"
-import { getRoleInfo, isTraitorRole, getBaseRole } from "@/lib/game-logic"
-import type { Player } from "@/lib/types"
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Moon, Target, Shield, Skull, Eye, Search, Bomb } from "lucide-react";
+import { getRoleInfo, isTraitorRole, getBaseRole } from "@/lib/game-logic";
+import type { Player } from "@/lib/types";
 
 interface NightActionsProps {
-  currentPlayer: Player
-  allPlayers: Player[]
-  deaths: Player[]
-  bombTargets: string[]
+  currentPlayer: Player;
+  allPlayers: Player[];
+  deaths: Player[];
+  bombTargets: string[];
   onSubmitAction: (
     targetId: string | null,
-    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE",
-  ) => void
-  timeRemaining: number
-  playerNotes: Record<string, string[]>
+    actionType: "KILL" | "PROTECT" | "INVESTIGATE" | "BOMB_PLANT" | "BOMB_DETONATE"
+  ) => void;
+  timeRemaining: number;
+  playerNotes: Record<string, string[]>;
 }
 
-export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, onSubmitAction, timeRemaining, playerNotes }: NightActionsProps) {
-  const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
-  const [actionSubmitted, setActionSubmitted] = useState(false)
-  const [mode, setMode] = useState<"KILL" | "ROLE">(
-    isTraitorRole(currentPlayer.role!) ? "KILL" : "ROLE",
-  )
+export function NightActions({
+  currentPlayer,
+  allPlayers,
+  deaths,
+  bombTargets,
+  onSubmitAction,
+  timeRemaining,
+  playerNotes,
+}: NightActionsProps) {
+  const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
+  const [actionSubmitted, setActionSubmitted] = useState(false);
+  const [mode, setMode] = useState<"KILL" | "ROLE">(isTraitorRole(currentPlayer.role!) ? "KILL" : "ROLE");
 
-  const visibleRole = currentPlayer.displayRole || currentPlayer.role!
-  const baseRole = getBaseRole(currentPlayer.role!)
-  const roleInfo = getRoleInfo(mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole)
-  const survivorShields = currentPlayer.survivorShields || 0
-  const isSurvivorWithoutShields = visibleRole === "SURVIVOR" && survivorShields <= 0
-  const notes = playerNotes[currentPlayer.id] || []
+  const visibleRole = currentPlayer.displayRole || currentPlayer.role!;
+  const baseRole = getBaseRole(currentPlayer.role!);
+  const roleInfo = getRoleInfo(mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole);
+
+  const survivorShields = (currentPlayer as any).survivorShields || 0;
+  const isSurvivorWithoutShields = visibleRole === "SURVIVOR" && survivorShields <= 0;
+
+  const notes = playerNotes[currentPlayer.id] || [];
+
   const renderGeneralNotes = () => (
     <Card className="bg-destructive/10 border-destructive/30 mb-6">
       <CardHeader>
@@ -57,91 +66,93 @@ export function NightActions({ currentPlayer, allPlayers, deaths, bombTargets, o
         )}
       </CardContent>
     </Card>
-  )
+  );
+
+  // ——— Hedef listesi ———
   let alivePlayers = allPlayers.filter((p) => {
-  if (!p.isAlive || p.id === currentPlayer.id) return false
-  if (mode === "KILL" && isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false
-  return true
-})
+    if (!p.isAlive || p.id === currentPlayer.id) return false;
+    // Hainler "KILL" modunda diğer hainleri hedefleyemez
+    if (mode === "KILL" && isTraitorRole(currentPlayer.role!) && isTraitorRole(p.role!)) return false;
+    return true;
+  });
 
-const alreadyBombed = new Set(bombTargets || [])
+  // Bombacı için: zaten bombalanmış hedefleri gizle (gece boşa gitmesin)
+  const alreadyBombed = new Set(bombTargets || []);
+  if (visibleRole === "BOMBER") {
+    alivePlayers = alivePlayers.filter((p) => !alreadyBombed.has(p.id));
+  }
+  const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0;
 
-if (visibleRole === "BOMBER") {
-  alivePlayers = alivePlayers.filter((p) => !alreadyBombed.has(p.id))
-}
-
-const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
-  const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!))
+  const aliveTraitors = allPlayers.filter((p) => p.isAlive && isTraitorRole(p.role!));
 
   function handleSubmitAction() {
     if (visibleRole === "BOMBER") {
-      onSubmitAction(selectedTarget, "BOMB_PLANT")
-      setActionSubmitted(true)
-      return
+      onSubmitAction(selectedTarget, "BOMB_PLANT");
+      setActionSubmitted(true);
+      return;
     }
-    let actionType: "KILL" | "PROTECT" | "INVESTIGATE" = "KILL"
+
+    let actionType: "KILL" | "PROTECT" | "INVESTIGATE" = "KILL";
     if (mode === "ROLE") {
-      const roleToUse = isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole
-      if (["DOCTOR", "GUARDIAN", "SURVIVOR"].includes(roleToUse)) actionType = "PROTECT"
-      if (["WATCHER", "DETECTIVE"].includes(roleToUse)) actionType = "INVESTIGATE"
+      const roleToUse = isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole;
+      if (["DOCTOR", "GUARDIAN", "SURVIVOR"].includes(roleToUse)) actionType = "PROTECT";
+      if (["WATCHER", "DETECTIVE"].includes(roleToUse)) actionType = "INVESTIGATE";
     }
-    onSubmitAction(selectedTarget, actionType)
-    setActionSubmitted(true)
+    onSubmitAction(selectedTarget, actionType);
+    setActionSubmitted(true);
   }
 
-  const getPlayerInitials = (name: string) => {
-    return name
+  const getPlayerInitials = (name: string) =>
+    name
       .split(" ")
       .map((n) => n[0])
       .join("")
       .toUpperCase()
-      .slice(0, 2)
-  }
+      .slice(0, 2);
 
   const getActionText = () => {
-    const role = mode === "ROLE" ? (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) : visibleRole
-    if (mode === "KILL" && isTraitorRole(currentPlayer.role!)) return "Öldürmek istediğin kişiyi seç"
+    const role = mode === "ROLE" ? (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) : visibleRole;
+    if (mode === "KILL" && isTraitorRole(currentPlayer.role!)) return "Öldürmek istediğin kişiyi seç";
     switch (role) {
       case "DOCTOR":
-        return "Diriltmek istediğin kişiyi seç"
+        return "Diriltmek istediğin kişiyi seç";
       case "GUARDIAN":
-        return "Engellemek istediğin kişiyi seç"
+        return "Engellemek istediğin kişiyi seç";
       case "WATCHER":
-        return "Gözetlemek istediğin kişiyi seç"
+        return "Gözetlemek istediğin kişiyi seç";
       case "DETECTIVE":
-        return "Soruşturmak istediğin kişiyi seç"
+        return "Soruşturmak istediğin kişiyi seç";
       case "SURVIVOR":
-        return survivorShields > 0
-          ? `Kendini koru - ${survivorShields} hakkın var`
-          : "Koruma hakkın kalmadı"
+        return survivorShields > 0 ? `Kendini koru - ${survivorShields} hakkın var` : "Koruma hakkın kalmadı";
       case "BOMBER":
-        return "Bomba yerleştirmek istediğin kişiyi seç"
+        return "Bomba yerleştirmek istediğin kişiyi seç";
       default:
-        return "Bu gece bir aksiyon yapman gerekmiyor"
+        return "Bu gece bir aksiyon yapman gerekmiyor";
     }
-  }
+  };
 
   const getActionIcon = () => {
-    const role = mode === "ROLE" ? (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) : visibleRole
-    if (mode === "KILL" && isTraitorRole(currentPlayer.role!)) return <Skull className="w-5 h-5 text-destructive" />
+    const role = mode === "ROLE" ? (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) : visibleRole;
+    if (mode === "KILL" && isTraitorRole(currentPlayer.role!)) return <Skull className="w-5 h-5 text-destructive" />;
     switch (role) {
       case "DOCTOR":
-        return <Shield className="w-5 h-5 text-green-400" />
+        return <Shield className="w-5 h-5 text-green-400" />;
       case "GUARDIAN":
-        return <Shield className="w-5 h-5 text-blue-400" />
+        return <Shield className="w-5 h-5 text-blue-400" />;
       case "WATCHER":
-        return <Eye className="w-5 h-5 text-yellow-400" />
+        return <Eye className="w-5 h-5 text-yellow-400" />;
       case "DETECTIVE":
-        return <Search className="w-5 h-5 text-indigo-400" />
+        return <Search className="w-5 h-5 text-indigo-400" />;
       case "SURVIVOR":
-        return <Shield className="w-5 h-5 text-green-400" />
+        return <Shield className="w-5 h-5 text-green-400" />;
       case "BOMBER":
-        return <Bomb className="w-5 h-5 text-orange-400" />
+        return <Bomb className="w-5 h-5 text-orange-400" />;
       default:
-        return <Moon className="w-5 h-5 text-primary" />
+        return <Moon className="w-5 h-5 text-primary" />;
     }
-  }
+  };
 
+  // ——— Durumlara göre ekranlar ———
   if (!currentPlayer.isAlive) {
     return (
       <div className="min-h-screen bg-background p-4">
@@ -158,7 +169,7 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
           {renderGeneralNotes()}
         </div>
       </div>
-    )
+    );
   }
 
   if (!roleInfo.nightAction || isSurvivorWithoutShields) {
@@ -182,7 +193,7 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
           {renderGeneralNotes()}
         </div>
       </div>
-    )
+    );
   }
 
   if (actionSubmitted) {
@@ -206,9 +217,10 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
           {renderGeneralNotes()}
         </div>
       </div>
-    )
+    );
   }
 
+  // ——— Ana ekran ———
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-md mx-auto">
@@ -230,7 +242,6 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
             <p className="text-sm text-muted-foreground">Kalan süre</p>
           </CardContent>
         </Card>
-
 
         {/* Notes */}
         {notes.length > 0 && (
@@ -258,13 +269,13 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
                 <span className="font-semibold text-destructive">Diğer Hainler</span>
               </div>
               <div className="flex gap-2">
-              {aliveTraitors
-                .filter((p) => p.id !== currentPlayer.id)
-                .map((traitor) => (
-                  <Badge key={traitor.id} variant="destructive" className="text-xs">
-                    {traitor.name}
-                  </Badge>
-                ))}
+                {aliveTraitors
+                  .filter((p) => p.id !== currentPlayer.id)
+                  .map((traitor) => (
+                    <Badge key={traitor.id} variant="destructive" className="text-xs">
+                      {traitor.name}
+                    </Badge>
+                  ))}
               </div>
             </CardContent>
           </Card>
@@ -300,11 +311,8 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
           <CardContent>
             <div className="space-y-3">
               {(
-                ["DOCTOR"].includes(
-                  mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole,
-                ) ||
-                ((mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) ===
-                  "SURVIVOR" &&
+                ["DOCTOR"].includes(mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) ||
+                ((mode === "ROLE" && isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) === "SURVIVOR" &&
                   survivorShields > 0)
               ) && (
                 <div
@@ -329,9 +337,16 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
                 </div>
               )}
 
+              {/* Bombacı için hiç hedef kalmadıysa kullanıcıyı bilgilendir */}
+              {bomberNoTargetLeft && (
+                <div className="p-3 rounded-lg border text-sm text-muted-foreground">
+                  Bu gece yerleştirecek hedef kalmadı (tüm canlı hedeflerde zaten bomban var).
+                  İstersen <strong>Bombaları Patlat</strong> butonunu kullanabilirsin.
+                </div>
+              )}
+
               {!(
-                mode === "ROLE" &&
-                (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) === "SURVIVOR"
+                mode === "ROLE" && (isTraitorRole(currentPlayer.role!) ? baseRole : visibleRole) === "SURVIVOR"
               ) &&
                 alivePlayers.map((player) => (
                   <div
@@ -361,36 +376,36 @@ const bomberNoTargetLeft = visibleRole === "BOMBER" && alivePlayers.length === 0
         </Card>
 
         {/* Action Button */}
-<div className="space-y-3">
-  <Button
-    onClick={handleSubmitAction}
-    disabled={!selectedTarget}
-    className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
-  >
-    {getActionIcon()}
-    <span className="ml-2">
-      {visibleRole === "BOMBER" ? "Bombayı Yerleştir" : "Aksiyonu Gönder"}
-    </span>
-  </Button>
+        <div className="space-y-3">
+          <Button
+            onClick={handleSubmitAction}
+            disabled={!selectedTarget || (visibleRole === "BOMBER" && bomberNoTargetLeft)}
+            className="w-full h-14 bg-primary hover:bg-primary/90 holographic-glow text-lg font-work-sans"
+          >
+            {getActionIcon()}
+            <span className="ml-2">{visibleRole === "BOMBER" ? "Bombayı Yerleştir" : "Aksiyonu Gönder"}</span>
+          </Button>
 
-  {visibleRole === "BOMBER" && (
-    <Button
-      onClick={() => {
-        onSubmitAction(null, "BOMB_DETONATE")
-        setActionSubmitted(true)
-      }}
-      variant="destructive"
-      className="w-full"
-    >
-      Bombaları Patlat
-    </Button>
-  )}
+          {visibleRole === "BOMBER" && (
+            <Button
+              onClick={() => {
+                onSubmitAction(null, "BOMB_DETONATE");
+                setActionSubmitted(true);
+              }}
+              variant="destructive"
+              className="w-full"
+            >
+              Bombaları Patlat
+            </Button>
+          )}
 
-  {isTraitorRole(currentPlayer.role!) && mode === "KILL" && (
-    <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">
-      Bu Gece Kimseyi Öldürme
-    </Button>
-  )}
-</div>
-  )
+          {isTraitorRole(currentPlayer.role!) && mode === "KILL" && (
+            <Button onClick={() => handleSubmitAction()} variant="outline" className="w-full">
+              Bu Gece Kimseyi Öldürme
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
