@@ -1204,8 +1204,16 @@ revived.forEach(pid => deathMark.delete(pid));
     const target = k.targetId ? room.players.get(k.targetId) : null;
     if (actor && target) {
       const killed = newDeaths.some((d) => d.id === target.id);
-      const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? ' ve öldürdün' : ''}`;
-      S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
+      if (killed) {
+        const note = `${S.currentTurn}. Gece: ${target.name} oyuncusunu öldürdün.`;
+        S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
+      } else {
+        const act = (S.nightActions || []).find(a => a.playerId === k.actorId && a.actionType === 'KILL' && a.targetId === k.targetId);
+        if (act && act.performed) {
+          const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın (başarısız).`;
+          S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
+        }
+      }
     }
   });
 
@@ -1274,7 +1282,7 @@ revived.forEach(pid => deathMark.delete(pid));
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
 
-  startPhase(roomId, 'NIGHT_RESULTS', 5);
+  startPhase(roomId, 'DEATH_ANNOUNCEMENT', 5);
 }
 
 function processVotes(roomId) {
@@ -1483,7 +1491,7 @@ wss.on('connection', (ws) => {
     }
 
     const { type, payload, roomId, playerId } = data || {};
-    const rid = roomId || ws.roomId;
+    const rid = roomId || (payload && payload.roomId) || ws.roomId;
 
     switch (type) {
       case 'JOIN_ROOM': {
@@ -1610,6 +1618,15 @@ wss.on('connection', (ws) => {
           console.log('[WS] Roles assigned on server for', startPlayers.length, 'players');
         } else {
           console.log('[WS] Roles provided by client for', startPlayers.length, 'players');
+          // Normalize: DELI must always be innocent-looking
+          startPlayers = startPlayers.map(p => {
+            if (p.role === 'DELI') {
+              const innocent = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE'];
+              const fake = innocent[Math.floor(Math.random()*innocent.length)];
+              return { ...p, role: 'DELI', displayRole: fake, survivorShields: 0 };
+            }
+            return p;
+          });
         }
 
         room.players = new Map(startPlayers.map((p) => [p.id, { ...p, isAlive: p.isAlive ?? true }]));
@@ -1669,6 +1686,7 @@ wss.on('connection', (ws) => {
           ...action,
           playerId: ws.playerId || playerId || action.playerId,
           timestamp: new Date(),
+          performed: true,
         };
 
         room.state.nightActions = [
@@ -1899,7 +1917,11 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case 'RESET_GAME': {
+      case 'RESET_GAME':
+      case 'OWNER_RETURN_TO_LOBBY':
+      case 'RETURN_TO_LOBBY':
+      case 'OWNER_RESTART':
+      case 'RESTART_GAME': {
         if (!rid) break;
         const room = rooms.get(rid);
         if (!room) break;
