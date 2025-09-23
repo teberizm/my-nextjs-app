@@ -22,33 +22,6 @@ const ROLE_TR = {
 const roleTR = (code) => ROLE_TR[code] || code;
 
 const server = http.createServer(app);
-
-// ---- Helper predicates for action typing (robust to client differences) ----
-function _upper(x){ try { return (x||'').toString().toUpperCase(); } catch(e){ return ''; } }
-
-function isWatchAction(a) {
-  // accept more client aliases
-  if (a && typeof a.action === 'string' && !_upper(a.actionType)) {
-    // some clients send .action instead of .actionType
-    a.actionType = a.action;
-  }
-  const t = _upper(a && a.actionType);
-  if (t === 'WATCH' || t === 'OBSERVE' || t === 'LOOKOUT' || t === 'TRACK' || t === 'WATCH_TARGET') return true;
-  if (t === 'KILL' || t === 'PROTECT' || t === 'BOMB_PLACE' || t === 'BOMB_DETONATE' || t === 'HEAL' || t === 'DOCTOR' || t === 'SAVE') return false;
-  // Unknown/absent actionType => treat as not-watch to avoid false positives
-  return false;
-}
-
-function isDetectAction(a) {
-  if (a && typeof a.action === 'string' && !_upper(a.actionType)) {
-    a.actionType = a.action;
-  }
-  const t = _upper(a && a.actionType);
-  if (t === 'INVESTIGATE' || t === 'INSPECT' || t === 'DETECT' || t === 'INVESTIGATE_TARGET') return true;
-  if (t === 'KILL' || t === 'PROTECT' || t === 'BOMB_PLACE' || t === 'BOMB_DETONATE' || t === 'HEAL' || t === 'DOCTOR' || t === 'SAVE') return false;
-  return false;
-}
-
 const wss = new WebSocket.Server({ server });
 
 /**
@@ -985,9 +958,7 @@ bombPlacers.forEach((a) => {
   const watcherActs = (S.nightActions || []).filter(a => {
     if (!a || !a.targetId) return false;
     const actor = players.find(p => p.id === a.playerId);
-    if (!(actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER'))) return false;
-    // Only when the actor explicitly performed a WATCH-type action
-    return isWatchAction(a) && a.performed === true;
+    return !!actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER');
   });
 
   // aynı watcher birden fazla kayıt girdiyse tek kez not yaz
@@ -1069,16 +1040,7 @@ bombPlacers.forEach((a) => {
 
   const detectiveActs = (S.nightActions || []).filter(a => {
     const actor = players.find(p => p.id === a.playerId);
-    if (!(actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE'))) return false;
-    if (!a || !a.targetId) return false;
-    if (a.performed !== true) return false;
-    if (isDetectAction(a)) return true;
-    if (!a.actionType || _upper(a.actionType) === '') return true; // default: detective investigated
-    return false;
-  });
-    if (!(actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE'))) return false;
-    if (!a || !a.targetId) return false;
-    return isDetectAction(a) && a.performed === true;
+    return actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') && a.targetId;
   });
 
   detectiveActs.forEach(a => {
@@ -1242,16 +1204,8 @@ revived.forEach(pid => deathMark.delete(pid));
     const target = k.targetId ? room.players.get(k.targetId) : null;
     if (actor && target) {
       const killed = newDeaths.some((d) => d.id === target.id);
-      if (killed) {
-        const note = `${S.currentTurn}. Gece: ${target.name} oyuncusunu öldürdün.`;
-        S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
-      } else {
-        const act = (S.nightActions || []).find(a => a.playerId === k.actorId && a.actionType === 'KILL' && a.targetId === k.targetId);
-        if (act && act.performed) {
-          const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın (başarısız).`;
-          S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
-        }
-      }
+      const note = `${S.currentTurn}. Gece: ${target.name} oyuncusuna saldırdın${killed ? ' ve öldürdün' : ''}`;
+      S.playerNotes[actor.id] = [...(S.playerNotes[actor.id] || []), note];
     }
   });
 
@@ -1320,7 +1274,7 @@ revived.forEach(pid => deathMark.delete(pid));
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
 
-  startPhase(roomId, 'DEATH_ANNOUNCEMENT', 5);
+  startPhase(roomId, 'NIGHT_RESULTS', 5);
 }
 
 function processVotes(roomId) {
@@ -1529,7 +1483,7 @@ wss.on('connection', (ws) => {
     }
 
     const { type, payload, roomId, playerId } = data || {};
-    const rid = roomId || (payload && payload.roomId) || ws.roomId;
+    const rid = roomId || ws.roomId;
 
     switch (type) {
       case 'JOIN_ROOM': {
@@ -1656,15 +1610,6 @@ wss.on('connection', (ws) => {
           console.log('[WS] Roles assigned on server for', startPlayers.length, 'players');
         } else {
           console.log('[WS] Roles provided by client for', startPlayers.length, 'players');
-          // Normalize: DELI must always be innocent-looking
-          startPlayers = startPlayers.map(p => {
-            if (p.role === 'DELI') {
-              const innocent = ['DOCTOR','GUARDIAN','WATCHER','DETECTIVE'];
-              const fake = innocent[Math.floor(Math.random()*innocent.length)];
-              return { ...p, role: 'DELI', displayRole: fake, survivorShields: 0 };
-            }
-            return p;
-          });
         }
 
         room.players = new Map(startPlayers.map((p) => [p.id, { ...p, isAlive: p.isAlive ?? true }]));
@@ -1724,7 +1669,6 @@ wss.on('connection', (ws) => {
           ...action,
           playerId: ws.playerId || playerId || action.playerId,
           timestamp: new Date(),
-          performed: true,
         };
 
         room.state.nightActions = [
@@ -1955,11 +1899,7 @@ wss.on('connection', (ws) => {
         break;
       }
 
-      case 'RESET_GAME':
-      case 'OWNER_RETURN_TO_LOBBY':
-      case 'RETURN_TO_LOBBY':
-      case 'OWNER_RESTART':
-      case 'RESTART_GAME': {
+      case 'RESET_GAME': {
         if (!rid) break;
         const room = rooms.get(rid);
         if (!room) break;
