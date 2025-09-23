@@ -22,6 +22,25 @@ const ROLE_TR = {
 const roleTR = (code) => ROLE_TR[code] || code;
 
 const server = http.createServer(app);
+
+// ---- Helper predicates for action typing (robust to client differences) ----
+function _upper(x){ try { return (x||'').toString().toUpperCase(); } catch(e){ return ''; } }
+
+function isWatchAction(a) {
+  const t = _upper(a && a.actionType);
+  if (t === 'WATCH' || t === 'OBSERVE' || t === 'LOOKOUT' || t === 'TRACK' || t === 'WATCH_TARGET') return true;
+  if (t === 'KILL' || t === 'PROTECT' || t === 'BOMB_PLACE' || t === 'BOMB_DETONATE' || t === 'HEAL' || t === 'DOCTOR' || t === 'SAVE') return false;
+  // Unknown/absent actionType => treat as not-watch to avoid false positives
+  return false;
+}
+
+function isDetectAction(a) {
+  const t = _upper(a && a.actionType);
+  if (t === 'INVESTIGATE' || t === 'INSPECT' || t === 'DETECT' || t === 'INVESTIGATE_TARGET') return true;
+  if (t === 'KILL' || t === 'PROTECT' || t === 'BOMB_PLACE' || t === 'BOMB_DETONATE' || t === 'HEAL' || t === 'DOCTOR' || t === 'SAVE') return false;
+  return false;
+}
+
 const wss = new WebSocket.Server({ server });
 
 /**
@@ -958,7 +977,9 @@ bombPlacers.forEach((a) => {
   const watcherActs = (S.nightActions || []).filter(a => {
     if (!a || !a.targetId) return false;
     const actor = players.find(p => p.id === a.playerId);
-    return !!actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER');
+    if (!(actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER'))) return false;
+    // Only when the actor explicitly performed a WATCH-type action
+    return isWatchAction(a) && a.performed === true;
   });
 
   // aynı watcher birden fazla kayıt girdiyse tek kez not yaz
@@ -1040,7 +1061,9 @@ bombPlacers.forEach((a) => {
 
   const detectiveActs = (S.nightActions || []).filter(a => {
     const actor = players.find(p => p.id === a.playerId);
-    return actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') && a.targetId;
+    if (!(actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE'))) return false;
+    if (!a || !a.targetId) return false;
+    return isDetectAction(a) && a.performed === true;
   });
 
   detectiveActs.forEach(a => {
