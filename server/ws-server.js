@@ -27,6 +27,11 @@ const server = http.createServer(app);
 function _upper(x){ try { return (x||'').toString().toUpperCase(); } catch(e){ return ''; } }
 
 function isWatchAction(a) {
+  // accept more client aliases
+  if (a && typeof a.action === 'string' && !_upper(a.actionType)) {
+    // some clients send .action instead of .actionType
+    a.actionType = a.action;
+  }
   const t = _upper(a && a.actionType);
   if (t === 'WATCH' || t === 'OBSERVE' || t === 'LOOKOUT' || t === 'TRACK' || t === 'WATCH_TARGET') return true;
   if (t === 'KILL' || t === 'PROTECT' || t === 'BOMB_PLACE' || t === 'BOMB_DETONATE' || t === 'HEAL' || t === 'DOCTOR' || t === 'SAVE') return false;
@@ -35,6 +40,9 @@ function isWatchAction(a) {
 }
 
 function isDetectAction(a) {
+  if (a && typeof a.action === 'string' && !_upper(a.actionType)) {
+    a.actionType = a.action;
+  }
   const t = _upper(a && a.actionType);
   if (t === 'INVESTIGATE' || t === 'INSPECT' || t === 'DETECT' || t === 'INVESTIGATE_TARGET') return true;
   if (t === 'KILL' || t === 'PROTECT' || t === 'BOMB_PLACE' || t === 'BOMB_DETONATE' || t === 'HEAL' || t === 'DOCTOR' || t === 'SAVE') return false;
@@ -1061,6 +1069,13 @@ bombPlacers.forEach((a) => {
 
   const detectiveActs = (S.nightActions || []).filter(a => {
     const actor = players.find(p => p.id === a.playerId);
+    if (!(actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE'))) return false;
+    if (!a || !a.targetId) return false;
+    if (a.performed !== true) return false;
+    if (isDetectAction(a)) return true;
+    if (!a.actionType || _upper(a.actionType) === '') return true; // default: detective investigated
+    return false;
+  });
     if (!(actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE'))) return false;
     if (!a || !a.targetId) return false;
     return isDetectAction(a) && a.performed === true;
