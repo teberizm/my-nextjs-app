@@ -748,22 +748,27 @@ function processNightActions(roomId) {
   if (!room) return;
   const S = room.state;
   const players = Array.from(room.players.values());
-
+  const killersThisTurn = new Set(
+  (S.nightActions || [])
+    .filter(a => a && a.actionType === 'KILL' && a.playerId)
+    .map(a => a.playerId)
+);
   // role-lock from QR (pre-block)
   const blockedPlayers = new Set([...(S.roleLockRandomNextNight || [])]);
 
   // 1) Guardians block (by timestamp)
-  const guardianActions = S.nightActions
-    .filter((a) => {
-      const actor = players.find((p) => p.id === a.playerId);
-      return (
-        a.actionType === 'PROTECT' &&
-        actor &&
-        (actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') &&
-        a.targetId
-      );
-    })
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  const guardianActions = (S.nightActions || [])
+  .filter((a) => {
+    const actor = players.find((p) => p.id === a.playerId);
+    return (
+      a.actionType === 'PROTECT' &&
+      actor &&
+      (actor.role === 'GUARDIAN' || actor.role === 'EVIL_GUARDIAN') &&
+      a.targetId &&
+      !killersThisTurn.has(actor.id) // ⬅️ KILL seçtiyse tutma uygulanmaz / not yazılmaz
+    );
+  })
+  .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
   guardianActions.forEach((a) => {
     if (!blockedPlayers.has(a.playerId) && a.targetId) {
@@ -956,10 +961,13 @@ bombPlacers.forEach((a) => {
 
   // watcher/e. watcher aksiyonları
   const watcherActs = (S.nightActions || []).filter(a => {
-    if (!a || !a.targetId) return false;
-    const actor = players.find(p => p.id === a.playerId);
-    return !!actor && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER');
-  });
+  if (!a || !a.targetId) return false;
+  const actor = players.find(p => p.id === a.playerId);
+  return !!actor
+    && (actor.role === 'WATCHER' || actor.role === 'EVIL_WATCHER') // Hain Gözcü rolünü kullanabilir
+    && !killersThisTurn.has(actor.id);                             // ama KILL seçtiyse gözcü notu yazma
+});
+
 
   // aynı watcher birden fazla kayıt girdiyse tek kez not yaz
   const seen = new Set();
@@ -1039,9 +1047,13 @@ bombPlacers.forEach((a) => {
   };
 
   const detectiveActs = (S.nightActions || []).filter(a => {
-    const actor = players.find(p => p.id === a.playerId);
-    return actor && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') && a.targetId;
-  });
+  const actor = players.find(p => p.id === a.playerId);
+  return actor
+    && (actor.role === 'DETECTIVE' || actor.role === 'EVIL_DETECTIVE') // Hain Dedektif rolünü kullanabilir
+    && a.targetId
+    && !killersThisTurn.has(actor.id);                                 // KILL seçtiyse dedektif notu yazma
+});
+
 
   detectiveActs.forEach(a => {
     const actor = players.find(p => p.id === a.playerId);
