@@ -1286,7 +1286,7 @@ revived.forEach(pid => deathMark.delete(pid));
   broadcast(room, 'NIGHT_ACTIONS_UPDATED', { actions: toPlain(S.nightActions) });
   broadcastSnapshot(roomId);
 
-  startPhase(roomId, 'NIGHT_RESULTS', 5);
+   startPhase(roomId, 'DEATH_ANNOUNCEMENT', 5);
 }
 
 function processVotes(roomId) {
