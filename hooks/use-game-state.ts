@@ -216,16 +216,18 @@ const submitSecretMessage = (targetId: string, text: string) => {
     wsClient.on("NOTES_UPDATED", onNotes);
     wsClient.on("SETTINGS_UPDATED", onSettingsUpdated); // <-- doğru kanal
     wsClient.on("RESET_GAME", onReset);
-    wsClient.on("SECRET_MESSAGE_REQUEST", (data: any) => {
+    const onSecretMessageRequest = (data: any) => {
   const p = data?.payload;
   if (!p) return;
   setSecretMsgReq(p);
-});
+};
 
-wsClient.on("SECRET_MESSAGE_RESULT", (data: any) => {
-  // Başarılı/başarısız fark etmez; modalı kapat
+const onSecretMessageResult = (_data: any) => {
   setSecretMsgReq(null);
-});
+};
+    wsClient.on("SECRET_MESSAGE_REQUEST", onSecretMessageRequest);
+
+    wsClient.on("SECRET_MESSAGE_RESULT", onSecretMessageResult);
     wsClient.sendEvent("REQUEST_SNAPSHOT" as any, {});
 
     return () => {
@@ -237,8 +239,8 @@ wsClient.on("SECRET_MESSAGE_RESULT", (data: any) => {
       wsClient.off("NOTES_UPDATED", onNotes);
       wsClient.off("SETTINGS_UPDATED", onSettingsUpdated); // <-- cleanup'ta da aynı handler
       wsClient.off("RESET_GAME", onReset);
-      wsClient.off("SECRET_MESSAGE_REQUEST", /* aynı handler referansı */);
-      wsClient.off("SECRET_MESSAGE_RESULT", /* aynı handler referansı */);
+      wsClient.off("SECRET_MESSAGE_REQUEST", onSecretMessageRequest);
+wsClient.off("SECRET_MESSAGE_RESULT", onSecretMessageResult);
     };
   }, [resetGame]);
 
