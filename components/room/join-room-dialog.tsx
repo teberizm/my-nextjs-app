@@ -29,6 +29,18 @@ export function JoinRoomDialog({ onJoin }: JoinRoomDialogProps) {
   }, [])
 
   const handleSubmit = () => {
+    localStorage.setItem("player_name", name.trim());
+localStorage.setItem("is_admin", JSON.stringify(!!isAdmin));
+if (isAdmin && password.trim()) {
+  localStorage.setItem("admin_pass", password.trim());
+} else {
+  localStorage.removeItem("admin_pass");
+}
+
+// İsteğe bağlı: kalıcı oyuncu id'si üret
+if (!localStorage.getItem("player_id")) {
+  localStorage.setItem("player_id", crypto.randomUUID());
+}
     const ok = onJoin(name.trim(), isAdmin, password)
     if (!ok) setError("Şifre yanlış")
   }
