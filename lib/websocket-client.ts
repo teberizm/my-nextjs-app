@@ -93,6 +93,7 @@ export class WebSocketClient extends EventEmitter {
   type: "JOIN_ROOM",
   payload: { roomId, player, adminPassword: opts?.adminPassword, gameId: opts?.gameId },
   roomId,
+  gameId: "210899",
   playerId: player.id
 });
       // Katılır katılmaz tam senkron için:
