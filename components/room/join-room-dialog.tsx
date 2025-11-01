@@ -41,7 +41,11 @@ if (isAdmin && password.trim()) {
 if (!localStorage.getItem("player_id")) {
   localStorage.setItem("player_id", crypto.randomUUID());
 }
-    const ok = onJoin(name.trim(), isAdmin, password)
+    const ok = onJoin(
+  name.trim(),
+  isAdmin,
+  isAdmin ? password.trim() : undefined
+);
     if (!ok) setError("Şifre yanlış")
   }
 
