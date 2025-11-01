@@ -117,7 +117,19 @@ export class WebSocketClient extends EventEmitter {
       this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() });
 
       // Odaya katıl
-      this.sendRaw({ type: "JOIN_ROOM", payload: { roomId, player }, roomId, playerId: player.id });
+      const adminPassword =
+  opts?.adminPassword ??
+  (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined);
+
+const gameId = opts?.gameId ?? "210899";
+
+this.sendRaw({
+  type: "JOIN_ROOM",
+  payload: { roomId, player, adminPassword, gameId },
+  roomId,
+  gameId,                 // (zarf içine de koyuyorsun; sunucu görmezse sorun değil)
+  playerId: player.id
+});
 
       // Snapshot iste (bazı yerlerde ayrıca isteniyor; iki kez gelse de sorun değil)
       this.sendEvent("REQUEST_SNAPSHOT", {});
