@@ -83,13 +83,18 @@ export class WebSocketClient extends EventEmitter {
   private outbox: Array<{ type: GameEvent; payload?: any; roomId?: string; playerId?: string }> = [];
 
   /** Tekrar connect çağrılırsa aynı soketi yeniden kullanır */
-  connect(roomId: string, player: Player) {
+   connect(roomId: string, player: Player, opts?: { adminPassword?: string; gameId?: string }) {
     this.roomId = roomId;
     this.player = player;
 
     // Açık bir soket varsa ve OPEN ise sadece JOIN gönder
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-      this.sendRaw({ type: "JOIN_ROOM", payload: { roomId, player }, roomId, playerId: player.id });
+      this.sendRaw({
+  type: "JOIN_ROOM",
+  payload: { roomId, player, adminPassword: opts?.adminPassword, gameId: opts?.gameId },
+  roomId,
+  playerId: player.id
+});
       // Katılır katılmaz tam senkron için:
       this.sendEvent("REQUEST_SNAPSHOT", {});
       return;
