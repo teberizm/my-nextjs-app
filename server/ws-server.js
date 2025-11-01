@@ -4,55 +4,68 @@ const http = require('http');
 const WebSocket = require('ws');
 
 // ---- Room registry (JSON) ----
-const fs = require('fs');
-const path = require('path');
-
-const ROOMS_FILE = '/var/www/play/rooms.json'; // rooms.json burada
+const ROOMS_URL = 'https://play.tebova.com/rooms.json';
 let ROOM_REGISTRY = { rooms: [] };
-let _roomsMtimeMs = 0;
+let ROOMS_LOADED_AT = 0;
 
-function _readRoomsNow() {
+// fetch yoksa basit fallback (Node <18 için)
+const fetchHTTP = (globalThis.fetch
+  ? globalThis.fetch.bind(globalThis)
+  : (url) => new Promise((resolve, reject) => {
+      const https = require('https');
+      https.get(url, (res) => {
+        let data = '';
+        res.on('data', (c) => (data += c));
+        res.on('end', () =>
+          resolve({
+            ok: res.statusCode >= 200 && res.statusCode < 300,
+            status: res.statusCode,
+            json: async () => JSON.parse(data || '{}'),
+          })
+        );
+      }).on('error', reject);
+    })
+);
+
+async function loadRooms() {
   try {
-    const stat = fs.statSync(ROOMS_FILE);
-    if (!stat.isFile()) return;
-    const mtimeMs = stat.mtimeMs || (stat.mtime && stat.mtime.getTime && stat.mtime.getTime()) || Date.now();
-    if (mtimeMs !== _roomsMtimeMs) {
-      const raw = fs.readFileSync(ROOMS_FILE, 'utf8');
-      const json = JSON.parse(raw);
-      if (json && Array.isArray(json.rooms)) {
-        ROOM_REGISTRY = json;
-        _roomsMtimeMs = mtimeMs;
-        console.log('[ROOM] loaded', ROOM_REGISTRY.rooms.length, 'rooms (mtime changed)');
-      }
+    const res = await fetchHTTP(ROOMS_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    if (json && Array.isArray(json.rooms)) {
+      ROOM_REGISTRY = json;
+      ROOMS_LOADED_AT = Date.now();
+      console.log('[ROOM] loaded', ROOM_REGISTRY.rooms.length, 'rooms from URL');
+    } else {
+      console.warn('[ROOM] invalid JSON shape from URL');
     }
   } catch (e) {
-    console.error('[ROOM] failed to read rooms.json:', e.message);
+    console.error('[ROOM] fetch failed:', e.message);
   }
 }
-
-// İlk yükleme ve periyodik kontrol
-_readRoomsNow();
-setInterval(_readRoomsNow, 5000);
+// İlk yükleme + periyodik yenileme
+loadRooms();
+setInterval(loadRooms, 60_000);
 
 // Yardımcılar (case-insensitive)
-function _getRoomRec(roomId) {
-  const key = String(roomId || '').trim().toLowerCase();
-  if (!key) return null;
-  const arr = ROOM_REGISTRY.rooms || [];
-  return arr.find(r => String(r.id || '').trim().toLowerCase() === key) || null;
+function findRoom(recId) {
+  const key = String(recId || '').trim().toLowerCase();
+  return (ROOM_REGISTRY.rooms || []).find(
+    (r) => String(r.id || '').trim().toLowerCase() === key
+  );
 }
 function isValidRoom(roomId) {
-  return !!_getRoomRec(roomId);
+  return !!findRoom(roomId);
 }
 function isRoomEnabled(roomId) {
-  const rec = _getRoomRec(roomId);
-  return !!(rec && (rec.enabled === undefined || rec.enabled === true));
+  const r = findRoom(roomId);
+  return !!(r && (r.enabled === undefined || r.enabled === true));
 }
 function isGameAllowed(roomId, gameId) {
-  const rec = _getRoomRec(roomId);
-  if (!rec) return false;
-  if (!rec.games || !Array.isArray(rec.games) || rec.games.length === 0) return true;
-  return rec.games.map(String).includes(String(gameId));
+  const r = findRoom(roomId);
+  if (!r) return false;
+  if (!Array.isArray(r.games) || r.games.length === 0) return true;
+  return r.games.map(String).includes(String(gameId));
 }
 
 
