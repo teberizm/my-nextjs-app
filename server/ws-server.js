@@ -4,36 +4,56 @@ const http = require('http');
 const WebSocket = require('ws');
 
 // ---- Room registry (JSON) ----
-const ROOMS_URL = 'https://play.tebova.com/rooms.json';
-let ROOM_REGISTRY = { rooms: {} };
+const fs = require('fs');
+const path = require('path');
 
-function loadRooms() {
+const ROOMS_FILE = '/var/www/play/rooms.json'; // senin rooms.json burada
+let ROOM_REGISTRY = { rooms: [] };
+let _roomsMtimeMs = 0;
+
+function _readRoomsNow() {
   try {
-    const raw = fs.readFileSync(ROOM_FILE, 'utf8');
-    const json = JSON.parse(raw);
-    if (json && typeof json === 'object' && json.rooms) {
-      ROOM_REGISTRY = json;
-      console.log('[ROOM] registry loaded:', Object.keys(ROOM_REGISTRY.rooms).length, 'rooms');
+    const stat = fs.statSync(ROOMS_FILE);
+    if (!stat.isFile()) return;
+    const mtimeMs = stat.mtimeMs || stat.mtime.getTime();
+    if (mtimeMs !== _roomsMtimeMs) {
+      const raw = fs.readFileSync(ROOMS_FILE, 'utf8');
+      const json = JSON.parse(raw);
+      if (json && Array.isArray(json.rooms)) {
+        ROOM_REGISTRY = json;
+        _roomsMtimeMs = mtimeMs;
+        console.log('[ROOM] loaded', ROOM_REGISTRY.rooms.length, 'rooms (mtime changed)');
+      }
     }
   } catch (e) {
-    console.error('[ROOM] failed to load rooms.json', e);
+    console.error('[ROOM] failed to read rooms.json:', e.message);
   }
 }
-loadRooms();
 
-function isValidRoom(roomId) {
-  return !!ROOM_REGISTRY.rooms[roomId];
+// ilk yükleme
+_readRoomsNow();
+// 5 saniyede bir değiştiyse yeniden yükle
+setInterval(_readRoomsNow, 5000);
+
+function _getRoomRec(roomId) {
+  const key = String(roomId || '').trim().toLowerCase();
+  if (!key) return null;
+  const arr = ROOM_REGISTRY.rooms || [];
+  return arr.find(r => String(r.id || '').trim().toLowerCase() === key) || null;
 }
-function verifyAdmin(roomId, adminPassword) {
-  const rec = ROOM_REGISTRY.rooms[roomId];
-  if (!rec) return false;
-  return rec.adminPassword && adminPassword && rec.adminPassword === adminPassword;
+function isValidRoom(roomId) {
+  return !!_getRoomRec(roomId);
+}
+function isRoomEnabled(roomId) {
+  const rec = _getRoomRec(roomId);
+  // enabled alanı yoksa varsayılan true kabul edelim
+  return !!(rec && (rec.enabled === undefined || rec.enabled === true));
 }
 function isGameAllowed(roomId, gameId) {
-  const rec = ROOM_REGISTRY.rooms[roomId];
-  if (!rec) return true; // kayıt yoksa serbest bırak
-  if (!rec.allowedGames || rec.allowedGames.length === 0) return true;
-  return rec.allowedGames.includes(String(gameId));
+  const rec = _getRoomRec(roomId);
+  if (!rec) return false;
+  if (!rec.games || !Array.isArray(rec.games) || rec.games.length === 0) return true;
+  return rec.games.map(String).includes(String(gameId));
 }
 
 
@@ -1533,20 +1553,28 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case 'JOIN_ROOM': {
-  const { roomId, player, gameId } = payload || {};
-  if (!roomId || !player) {
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Eksik oda veya oyuncu bilgisi' } }));
+  const { roomId, player, adminPassword, gameId } = payload || {};
+  if (!roomId || !player || !player.id) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN payload invalid' } }));
     return;
   }
 
-  // Oda doğrulama
-  if (!isValidRoom(roomId) || !isRoomEnabled(roomId)) {
+  // rooms.json en az bir kere okunmadıysa hemen oku (zamanlama güvenliği)
+  if (!(ROOM_REGISTRY.rooms && ROOM_REGISTRY.rooms.length)) _readRoomsNow();
+
+  // Doğrulama
+  if (!isValidRoom(roomId)) {
+    console.warn('[JOIN] invalid room:', roomId, 'known=', (ROOM_REGISTRY.rooms || []).map(r=>r.id));
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
-
-  // Oyun erişim izni
+  if (!isRoomEnabled(roomId)) {
+    console.warn('[JOIN] disabled room:', roomId);
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
+    return;
+  }
   if (gameId && !isGameAllowed(roomId, gameId)) {
+    console.warn('[JOIN] game not allowed:', roomId, 'gameId=', gameId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Bu oyun bu oda için kapalı' } }));
     return;
   }
