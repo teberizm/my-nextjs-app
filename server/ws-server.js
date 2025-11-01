@@ -3,6 +3,40 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 
+// ---- Room registry (JSON) ----
+const ROOM_FILE = path.join(ROOT_DIR, 'data', 'rooms.json');
+let ROOM_REGISTRY = { rooms: {} };
+
+function loadRooms() {
+  try {
+    const raw = fs.readFileSync(ROOM_FILE, 'utf8');
+    const json = JSON.parse(raw);
+    if (json && typeof json === 'object' && json.rooms) {
+      ROOM_REGISTRY = json;
+      console.log('[ROOM] registry loaded:', Object.keys(ROOM_REGISTRY.rooms).length, 'rooms');
+    }
+  } catch (e) {
+    console.error('[ROOM] failed to load rooms.json', e);
+  }
+}
+loadRooms();
+
+function isValidRoom(roomId) {
+  return !!ROOM_REGISTRY.rooms[roomId];
+}
+function verifyAdmin(roomId, adminPassword) {
+  const rec = ROOM_REGISTRY.rooms[roomId];
+  if (!rec) return false;
+  return rec.adminPassword && adminPassword && rec.adminPassword === adminPassword;
+}
+function isGameAllowed(roomId, gameId) {
+  const rec = ROOM_REGISTRY.rooms[roomId];
+  if (!rec) return true; // kayıt yoksa serbest bırak
+  if (!rec.allowedGames || rec.allowedGames.length === 0) return true;
+  return rec.allowedGames.includes(String(gameId));
+}
+
+
 // Initialize express app FIRST (the earlier snippet had `const app =` left unfinished)
 const app = express();
 
@@ -1499,13 +1533,30 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case 'JOIN_ROOM': {
-        const { roomId: joinRoomId, player } = payload || {};
-        if (!joinRoomId || !player || !player.id) {
-          ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
-          return;
-        }
-        ws.roomId = joinRoomId;
-        ws.playerId = player.id;
+  const { roomId: joinRoomId, player, adminPassword, gameId } = payload || {};
+  if (!joinRoomId || !player || !player.id) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
+    return;
+  }
+
+  // 1) Oda doğrulaması
+  if (!isValidRoom(joinRoomId)) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'INVALID_ROOM' } }));
+    return;
+  }
+
+  // 2) Oyun yetkisi (parametre gelmediyse serbest)
+  if (gameId && !isGameAllowed(joinRoomId, gameId)) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'GAME_NOT_ALLOWED' } }));
+    return;
+  }
+
+  ws.roomId = joinRoomId;
+  ws.playerId = player.id;
+
+  // 3) Admin kontrolü → isOwner ata
+  const ownerOk = verifyAdmin(joinRoomId, adminPassword);
+  const bindPlayer = { ...player, isOwner: ownerOk || !!player.isOwner };
 
         if (!rooms.has(joinRoomId)) {
           rooms.set(joinRoomId, {
@@ -1556,25 +1607,25 @@ wss.on('connection', (ws) => {
 
         const room = rooms.get(joinRoomId);
 
-        // Oyuncuyu odaya ekle/güncelle
-        const existing = room.players.get(player.id) || {};
-        room.players.set(player.id, { ...existing, ...player, isAlive: existing.isAlive ?? true });
-        if (!room.ownerId && player.isOwner) {
-          room.ownerId = player.id;
-        }
-        room.sockets.add(ws);
+  // ownerId sabitle
+  const existing = room.players.get(bindPlayer.id) || {};
+  room.players.set(bindPlayer.id, { ...existing, ...bindPlayer, isAlive: existing.isAlive ?? true });
+  if (!room.ownerId && bindPlayer.isOwner) {
+    room.ownerId = bindPlayer.id;
+  }
+  room.sockets.add(ws);
 
-        ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
+  ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
 
-        broadcast(room, 'PLAYER_LIST_UPDATED', {
-          players: Array.from(room.players.values()),
-          newPlayer: player,
-        });
+  broadcast(room, 'PLAYER_LIST_UPDATED', {
+    players: Array.from(room.players.values()),
+    newPlayer: bindPlayer,
+  });
 
-        const snap = snapshotRoom(joinRoomId);
-        ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: joinRoomId, state: snap }, serverTime: now() }));
-        break;
-      }
+  const snap = snapshotRoom(joinRoomId);
+  ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: joinRoomId, state: snap }, serverTime: now() }));
+  break;
+}
 
       case 'KICK_PLAYER': {
         if (!rid) return;
