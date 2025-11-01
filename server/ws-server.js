@@ -4,7 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 
 // ---- Room registry (JSON) ----
-const ROOM_FILE = path.join(ROOT_DIR, 'data', 'rooms.json');
+const ROOMS_URL = 'https://play.tebova.com/rooms.json';
 let ROOM_REGISTRY = { rooms: {} };
 
 function loadRooms() {
@@ -1533,25 +1533,25 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case 'JOIN_ROOM': {
-  const { roomId: joinRoomId, player, adminPassword, gameId } = payload || {};
-  if (!joinRoomId || !player || !player.id) {
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
+  const { roomId, player, gameId } = payload || {};
+  if (!roomId || !player) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Eksik oda veya oyuncu bilgisi' } }));
     return;
   }
 
-  // 1) Oda doğrulaması
-  if (!isValidRoom(joinRoomId)) {
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'INVALID_ROOM' } }));
+  // Oda doğrulama
+  if (!isValidRoom(roomId) || !isRoomEnabled(roomId)) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
 
-  // 2) Oyun yetkisi (parametre gelmediyse serbest)
-  if (gameId && !isGameAllowed(joinRoomId, gameId)) {
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'GAME_NOT_ALLOWED' } }));
+  // Oyun erişim izni
+  if (gameId && !isGameAllowed(roomId, gameId)) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Bu oyun bu oda için kapalı' } }));
     return;
   }
 
-  ws.roomId = joinRoomId;
+  ws.roomId = roomId;
   ws.playerId = player.id;
 
   // 3) Admin kontrolü → isOwner ata
