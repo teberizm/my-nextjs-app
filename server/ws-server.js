@@ -7,7 +7,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const path = require('path');
 
-const ROOMS_FILE = '/var/www/play/rooms.json'; // senin rooms.json burada
+const ROOMS_FILE = '/var/www/play/rooms.json'; // rooms.json burada
 let ROOM_REGISTRY = { rooms: [] };
 let _roomsMtimeMs = 0;
 
@@ -15,7 +15,7 @@ function _readRoomsNow() {
   try {
     const stat = fs.statSync(ROOMS_FILE);
     if (!stat.isFile()) return;
-    const mtimeMs = stat.mtimeMs || stat.mtime.getTime();
+    const mtimeMs = stat.mtimeMs || (stat.mtime && stat.mtime.getTime && stat.mtime.getTime()) || Date.now();
     if (mtimeMs !== _roomsMtimeMs) {
       const raw = fs.readFileSync(ROOMS_FILE, 'utf8');
       const json = JSON.parse(raw);
@@ -30,11 +30,11 @@ function _readRoomsNow() {
   }
 }
 
-// ilk yükleme
+// İlk yükleme ve periyodik kontrol
 _readRoomsNow();
-// 5 saniyede bir değiştiyse yeniden yükle
 setInterval(_readRoomsNow, 5000);
 
+// Yardımcılar (case-insensitive)
 function _getRoomRec(roomId) {
   const key = String(roomId || '').trim().toLowerCase();
   if (!key) return null;
@@ -46,7 +46,6 @@ function isValidRoom(roomId) {
 }
 function isRoomEnabled(roomId) {
   const rec = _getRoomRec(roomId);
-  // enabled alanı yoksa varsayılan true kabul edelim
   return !!(rec && (rec.enabled === undefined || rec.enabled === true));
 }
 function isGameAllowed(roomId, gameId) {
@@ -1559,17 +1558,12 @@ wss.on('connection', (ws) => {
     return;
   }
 
-  // rooms.json en az bir kere okunmadıysa hemen oku (zamanlama güvenliği)
+  // rooms.json henüz hiç okunmadıysa anında oku (timing güvenliği)
   if (!(ROOM_REGISTRY.rooms && ROOM_REGISTRY.rooms.length)) _readRoomsNow();
 
-  // Doğrulama
-  if (!isValidRoom(roomId)) {
-    console.warn('[JOIN] invalid room:', roomId, 'known=', (ROOM_REGISTRY.rooms || []).map(r=>r.id));
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
-    return;
-  }
-  if (!isRoomEnabled(roomId)) {
-    console.warn('[JOIN] disabled room:', roomId);
+  // Oda / Enabled / Game yetkisi
+  if (!isValidRoom(roomId) || !isRoomEnabled(roomId)) {
+    console.warn('[JOIN] invalid/disabled room:', roomId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
