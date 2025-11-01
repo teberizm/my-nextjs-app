@@ -1551,7 +1551,7 @@ wss.on('connection', (ws) => {
     ws.isAlive = true;
   });
 
-  ws.on('message', (message) => {
+  ws.on('message', async (raw) => {
     let data;
     try {
       data = JSON.parse(message);
@@ -1571,16 +1571,19 @@ wss.on('connection', (ws) => {
     return;
   }
 
-  // rooms.json henüz hiç okunmadıysa anında oku (timing güvenliği)
-  if (!(ROOM_REGISTRY.rooms && ROOM_REGISTRY.rooms.length)) _readRoomsNow();
+  // Oda listesi henüz boşsa bir kere zorla yükle (timing güvenliği)
+  if (!ROOM_REGISTRY.rooms || ROOM_REGISTRY.rooms.length === 0) {
+    await loadRooms();
+  }
 
-  // Oda / Enabled / Game yetkisi
+  // rooms.json kontrolleri
   if (!isValidRoom(roomId) || !isRoomEnabled(roomId)) {
     console.warn('[JOIN] invalid/disabled room:', roomId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
-  if (gameId && !isGameAllowed(roomId, gameId)) {
+  // oyun yetkisi – bu oyunda "210899"
+  if ((gameId ?? '210899') && !isGameAllowed(roomId, gameId ?? '210899')) {
     console.warn('[JOIN] game not allowed:', roomId, 'gameId=', gameId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Bu oyun bu oda için kapalı' } }));
     return;
