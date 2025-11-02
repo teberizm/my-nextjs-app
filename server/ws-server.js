@@ -3,6 +3,15 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 
+function broadcastToRoom(roomId, type, payload) {
+  const room = rooms.get(roomId);
+  if (!room) return;
+  for (const sock of room.sockets) {
+    if (sock.readyState === 1) {
+      sock.send(JSON.stringify({ type, payload }));
+    }
+  }
+}
 // ---- Room registry (JSON) ----
 const ROOMS_URL = 'https://play.tebova.com/rooms.json';
 let ROOM_REGISTRY = { rooms: [] };
@@ -1565,52 +1574,44 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case 'JOIN_ROOM': {
-  // ▶ payload'ı tek yerde çöz: (joinRoomId ismini sabit kullanalım)
   const { roomId: joinRoomId, player, adminPassword, gameId } = payload || {};
 
-  // Basit doğrulamalar
   if (!joinRoomId || !player || !player.id) {
-    const msg = 'JOIN_ROOM payload invalid';
-    console.warn('[JOIN]', msg, { joinRoomId, player });
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: msg } }));
+    console.warn('[JOIN] payload invalid', payload);
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN payload invalid' } }));
     return;
   }
 
-  // rooms.json ilk kez/dolu değilse bir defa zorla yükle
-  if (!ROOM_REGISTRY?.rooms || ROOM_REGISTRY.rooms.length === 0) {
+  // rooms.json ilk yükleme (boşsa)
+  if (!ROOM_REGISTRY?.rooms?.length && typeof loadRooms === 'function') {
     try { await loadRooms(); } catch {}
   }
-
-  // rooms.json doğrulamaları (formatın: {id,label,enabled,games:[...]})
+  // Oda & oyun izinleri (varsa)
   if (typeof isValidRoom === 'function' && !isValidRoom(joinRoomId)) {
-    console.warn('[JOIN] invalid room:', joinRoomId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
   if (typeof isRoomEnabled === 'function' && !isRoomEnabled(joinRoomId)) {
-    console.warn('[JOIN] disabled room:', joinRoomId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
   const gid = (gameId ?? '210899');
   if (typeof isGameAllowed === 'function' && !isGameAllowed(joinRoomId, gid)) {
-    console.warn('[JOIN] game not allowed:', { joinRoomId, gid });
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Bu oyun bu oda için kapalı' } }));
     return;
   }
 
-  // ▶ Odayı hazırla (rooms map'in yoksa bu yapıyı başta tanımlamış olmalısın)
+  // Oda yoksa oluştur
   if (!rooms.has(joinRoomId)) {
     rooms.set(joinRoomId, {
-      players: new Map(),    // key: playerId, val: {id,name,isOwner,isAlive,...}
-      sockets: new Set(),    // odaya bağlı socket listesi
+      players: new Map(),
+      sockets: new Set(),
       settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 },
       state: {
         phase: 'LOBBY',
         currentTurn: 1,
         nightActions: [],
         votes: {},
-        // … burada senin mevcut tüm default state alanların kalabilir …
         selectedCardDrawers: [],
         currentCardDrawerIndex: 0,
         currentCardDrawer: null,
@@ -1623,7 +1624,7 @@ wss.on('connection', (ws) => {
         roleRevealReady: [],
         discussionEndVoters: [],
         game: null,
-        phaseEndsAt: 0
+        phaseEndsAt: 0,
       },
       timer: null,
       ownerId: null,
@@ -1632,40 +1633,33 @@ wss.on('connection', (ws) => {
 
   const room = rooms.get(joinRoomId);
 
-  // ▶ Admin kontrolü (opsiyonel)
+  // Admin şifresi geçerliyse sahiplik ata (opsiyonel)
   let isOwner = !!player.isOwner;
   if (typeof verifyAdmin === 'function') {
     try { if (verifyAdmin(joinRoomId, adminPassword)) isOwner = true; } catch {}
   }
 
-  // ▶ Oyuncuyu kaydet
+  // Oyuncuyu kaydet
   const existing = room.players.get(player.id) || {};
   const boundPlayer = { ...existing, ...player, isOwner, isAlive: existing.isAlive ?? true };
   room.players.set(player.id, boundPlayer);
   if (!room.ownerId && boundPlayer.isOwner) room.ownerId = player.id;
 
-  // ▶ Socket'i odaya ekle
+  // Socket’i odaya bağla
   ws.roomId = joinRoomId;
   ws.playerId = player.id;
   room.sockets.add(ws);
 
-  console.log('[JOIN] OK:', { room: joinRoomId, player: { id: player.id, name: player.name, isOwner } });
+  console.log('[JOIN] OK', { room: joinRoomId, player: { id: player.id, name: player.name, isOwner } });
 
-  // ▶ İstemciye onay
+  // 1) İstemciye onay
   ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
 
-  // ▶ Oyuncu listesini odaya yayınla
+  // 2) Güncel oyuncu listesini tüm odaya yayınla
   const playersArray = Array.from(room.players.values());
-  for (const sock of room.sockets) {
-    if (sock.readyState === 1 /* OPEN */) {
-      sock.send(JSON.stringify({
-        type: 'PLAYER_LIST_UPDATED',
-        payload: { players: playersArray, newPlayer: boundPlayer }
-      }));
-    }
-  }
+  broadcastToRoom(joinRoomId, 'PLAYER_LIST_UPDATED', { players: playersArray, newPlayer: boundPlayer });
 
-  // ▶ Snapshot'ı sadece bu socket'e ver (veya istersen tüm odaya)
+  // 3) Sadece bu sokete snapshot ver (UI ilk state’i alsın)
   if (typeof snapshotRoom === 'function') {
     const snap = snapshotRoom(joinRoomId);
     ws.send(JSON.stringify({
@@ -1674,6 +1668,7 @@ wss.on('connection', (ws) => {
       serverTime: Date.now()
     }));
   }
+
   break;
 }
 
