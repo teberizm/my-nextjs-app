@@ -2,7 +2,28 @@
 
 import { EventEmitter } from "events";
 import type { Player } from "./types";
+function resolveRoomId(passed?: string | null): string {
+  try {
+    const urlRoom = typeof window !== "undefined"
+      ? (new URLSearchParams(window.location.search).get("room") || "").trim()
+      : "";
+    const lsRoom = typeof window !== "undefined"
+      ? (localStorage.getItem("tebova_room") || "").trim()
+      : "";
 
+    const isValid = (s: string) => /^[a-z0-9_-]{3,32}$/i.test(s);
+
+    if (isValid(urlRoom)) {
+      localStorage.setItem("tebova_room", urlRoom);
+      return urlRoom;
+    }
+    if (passed && isValid(passed)) return passed;
+    if (isValid(lsRoom)) return lsRoom;
+    return "default";
+  } catch {
+    return "default";
+  }
+}
 export type GameEvent =
   | "ROOM_JOINED"
   | "PLAYER_LIST_UPDATED"
@@ -84,65 +105,66 @@ export class WebSocketClient extends EventEmitter {
 
   /** Tekrar connect çağrılırsa aynı soketi yeniden kullanır */
    connect(roomId: string, player: Player, opts?: { adminPassword?: string; gameId?: string }) {
-    this.roomId = roomId;
+     const RESOLVED_ROOM = resolveRoomId(roomId);
+    this.roomId = RESOLVED_ROOM;
     this.player = player;
 
     // Açık bir soket varsa ve OPEN ise sadece JOIN gönder
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.sendRaw({
   type: "JOIN_ROOM",
-  payload: { roomId, player, adminPassword: opts?.adminPassword, gameId: opts?.gameId },
-  roomId,
-  gameId: "210899",
-  playerId: player.id
+  payload: {
+    roomId: RESOLVED_ROOM,
+    player,
+    adminPassword: opts?.adminPassword ??
+      (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined),
+    gameId: opts?.gameId ?? "210899",
+  },
+  roomId: RESOLVED_ROOM,
+  playerId: player.id,
 });
+
       // Katılır katılmaz tam senkron için:
       this.sendEvent("REQUEST_SNAPSHOT", {});
       return;
     }
 
-    const url = computeWsUrl();
-    console.log("[ws] connecting to:", url);
+    const wsUrl = computeWsUrl() + `?room=${encodeURIComponent(RESOLVED_ROOM)}`;
+console.log("[ws] connecting to:", wsUrl);
 
-    try {
-      this.socket = new WebSocket(url);
-    } catch (err) {
-      console.error("[ws] invalid WebSocket URL:", url, err);
-      this.emit("ERROR", { message: "Invalid WebSocket URL", url });
-      return;
-    }
+try {
+  this.socket = new WebSocket(wsUrl);
+} catch (err) {
+  console.error("[ws] invalid WebSocket URL:", wsUrl, err);
+  this.emit("ERROR", { message: "Invalid WebSocket URL", url: wsUrl });
+  return;
+}
 
     this.socket.onopen = () => {
-      console.log("[ws] open", url);
-      this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() });
+  console.log("[ws] open", wsUrl);
+  this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() });
 
-      // Odaya katıl
-      const adminPassword =
-  opts?.adminPassword ??
-  (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined);
+  const adminPassword =
+    opts?.adminPassword ??
+    (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined);
+  const gameId = opts?.gameId ?? "210899";
 
-const gameId = opts?.gameId ?? "210899";
-
-this.sendRaw({
+  this.sendRaw({
   type: "JOIN_ROOM",
-  payload: { roomId, player, adminPassword, gameId },
-  roomId,
-  gameId,                 // (zarf içine de koyuyorsun; sunucu görmezse sorun değil)
-  playerId: player.id
+  payload: {
+    roomId: RESOLVED_ROOM,
+    player,
+    adminPassword: opts?.adminPassword ??
+      (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined),
+    gameId: opts?.gameId ?? "210899",
+  },
+  roomId: RESOLVED_ROOM,
+  playerId: player.id,
 });
 
-      // Snapshot iste (bazı yerlerde ayrıca isteniyor; iki kez gelse de sorun değil)
-      this.sendEvent("REQUEST_SNAPSHOT", {});
 
-      // Outbox'ı flush et
-      if (this.outbox.length > 0) {
-        const pending = [...this.outbox];
-        this.outbox = [];
-        pending.forEach((m) =>
-          this.sendRaw({ ...m, roomId: m.roomId ?? this.roomId ?? roomId, playerId: m.playerId ?? this.player?.id }),
-        );
-      }
-    };
+  this.sendEvent("REQUEST_SNAPSHOT", {});
+};
 
     this.socket.onmessage = (event: MessageEvent) => {
       let data: any;
