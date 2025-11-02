@@ -1761,12 +1761,23 @@ wss.on('connection', (ws) => {
       }
 
       case 'REQUEST_SNAPSHOT': {
-        const room = rooms.get(rid);
-        if (!room) return;
-        const snap = snapshotRoom(rid);
-        ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: rid, state: snap }, serverTime: now() }));
-        break;
-      }
+  const rId = ws.roomId;
+  if (!rId || !rooms.has(rId)) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'ROOM_NOT_JOINED' } }));
+    return;
+  }
+  const snap = typeof snapshotRoom === 'function' ? snapshotRoom(rId) : { state: rooms.get(rId)?.state };
+  ws.send(JSON.stringify({
+    type: 'STATE_SNAPSHOT',
+    payload: { roomId: rId, state: snap },
+    serverTime: Date.now()
+  }));
+
+  // Güncel oyuncu listesini de sadece bu sokete gönder (UI hemen güncellensin)
+  const playersArray = Array.from(rooms.get(rId).players.values());
+  ws.send(JSON.stringify({ type: 'PLAYER_LIST_UPDATED', payload: { players: playersArray } }));
+  break;
+}
 
       case 'NIGHT_ACTION_SUBMITTED': {
         const room = rooms.get(rid);
