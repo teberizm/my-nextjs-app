@@ -140,33 +140,35 @@ try {
   return;
 }
 
-    this.socket.onopen = () => {
+   this.socket.onopen = () => {
   console.log("[ws] open", wsUrl);
   this.emit("CONNECTION_STATUS", { connected: true, timestamp: new Date() });
 
-  // 1) JOIN_ROOM
-  this.sendRaw({
-    type: "JOIN_ROOM",
-    payload: {
-      roomId: RESOLVED_ROOM,
-      player,
-      adminPassword:
-        opts?.adminPassword ??
-        (typeof window !== "undefined"
-          ? (localStorage.getItem("admin_pass") || undefined)
-          : undefined),
-      gameId: opts?.gameId ?? "210899",
-    },
-    roomId: RESOLVED_ROOM,
-    playerId: player.id,
-  });
+  const adminPassword =
+    opts?.adminPassword ??
+    (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined);
+  const gameId = opts?.gameId ?? "210899";
 
-  // 2) Outbox flush — bağlanmadan önce kuyruklanan mesajlar gitsin
-  while (this.outbox.length > 0) {
+  this.sendRaw({
+  type: "JOIN_ROOM",
+  payload: {
+    roomId: RESOLVED_ROOM,
+    player,
+    adminPassword: opts?.adminPassword ??
+      (typeof window !== "undefined" ? (localStorage.getItem("admin_pass") || undefined) : undefined),
+    gameId: opts?.gameId ?? "210899",
+  },
+  roomId: RESOLVED_ROOM,
+  playerId: player.id,
+});
+
+
+  this.sendEvent("REQUEST_SNAPSHOT", {});
+};
+    while (this.outbox.length > 0) {
     const msg = this.outbox.shift()!;
     this.sendRaw(msg);
   }
-
     this.socket.onmessage = (event: MessageEvent) => {
       let data: any;
       try {
