@@ -1565,53 +1565,57 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case 'JOIN_ROOM': {
+  // ▶ payload'ı tek yerde çöz: (joinRoomId ismini sabit kullanalım)
   const { roomId: joinRoomId, player, adminPassword, gameId } = payload || {};
+
+  // Basit doğrulamalar
   if (!joinRoomId || !player || !player.id) {
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
+    const msg = 'JOIN_ROOM payload invalid';
+    console.warn('[JOIN]', msg, { joinRoomId, player });
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: msg } }));
     return;
   }
 
-  // rooms.json’dan izin/kapanıklık kontrolü (odalar dışa açıldıysa bırakılabilir)
-  // loadRooms() -> isValidRoom(), isRoomEnabled(), isGameAllowed() varsa kullan
-  if (!ROOM_REGISTRY.rooms || ROOM_REGISTRY.rooms.length === 0) {
-    await loadRooms();
+  // rooms.json ilk kez/dolu değilse bir defa zorla yükle
+  if (!ROOM_REGISTRY?.rooms || ROOM_REGISTRY.rooms.length === 0) {
+    try { await loadRooms(); } catch {}
   }
-  if (!isValidRoom(joinRoomId) || !isRoomEnabled(joinRoomId)) {
+
+  // rooms.json doğrulamaları (formatın: {id,label,enabled,games:[...]})
+  if (typeof isValidRoom === 'function' && !isValidRoom(joinRoomId)) {
+    console.warn('[JOIN] invalid room:', joinRoomId);
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
-  if ((gameId ?? '210899') && !isGameAllowed(joinRoomId, gameId ?? '210899')) {
+  if (typeof isRoomEnabled === 'function' && !isRoomEnabled(joinRoomId)) {
+    console.warn('[JOIN] disabled room:', joinRoomId);
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
+    return;
+  }
+  const gid = (gameId ?? '210899');
+  if (typeof isGameAllowed === 'function' && !isGameAllowed(joinRoomId, gid)) {
+    console.warn('[JOIN] game not allowed:', { joinRoomId, gid });
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Bu oyun bu oda için kapalı' } }));
     return;
   }
 
-  ws.roomId = joinRoomId;
-  ws.playerId = player.id;
-
+  // ▶ Odayı hazırla (rooms map'in yoksa bu yapıyı başta tanımlamış olmalısın)
   if (!rooms.has(joinRoomId)) {
     rooms.set(joinRoomId, {
-      players: new Map(),
-      sockets: new Set(),
+      players: new Map(),    // key: playerId, val: {id,name,isOwner,isAlive,...}
+      sockets: new Set(),    // odaya bağlı socket listesi
       settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 },
       state: {
         phase: 'LOBBY',
         currentTurn: 1,
         nightActions: [],
         votes: {},
-        // --- QR/effect state, vb. mevcut defaultların aynı kalabilir ---
-        cardShieldsNextNight: [],
-        reflectAttacksTonight: [],
-        reverseProtectEffectsTonight: false,
-        bypassShieldsActorNextNight: [],
-        roleLockRandomNextNight: [],
-        doubleVoteToday: [],
-        voteBanToday: [],
-        lynchImmunityToday: [],
-        lynchSwapIfSelfToday: [],
-        saviorCancelLynchToday: false,
-        scapegoatToday: [],
-        loversPairs: [],
-        resurrectionStone: null,
+        // … burada senin mevcut tüm default state alanların kalabilir …
+        selectedCardDrawers: [],
+        currentCardDrawerIndex: 0,
+        currentCardDrawer: null,
+        pendingCard: null,
+        secretMessageRequests: {},
         deathsThisTurn: [],
         deathLog: [],
         bombsByOwner: {},
@@ -1619,12 +1623,7 @@ wss.on('connection', (ws) => {
         roleRevealReady: [],
         discussionEndVoters: [],
         game: null,
-        phaseEndsAt: 0,
-        selectedCardDrawers: [],
-        currentCardDrawerIndex: 0,
-        currentCardDrawer: null,
-        pendingCard: null,
-        secretMessageRequests: {},
+        phaseEndsAt: 0
       },
       timer: null,
       ownerId: null,
@@ -1633,26 +1632,51 @@ wss.on('connection', (ws) => {
 
   const room = rooms.get(joinRoomId);
 
-  // Yönetici şifresi geldiyse sahiplik ata
-  const ownerOk = verifyAdmin(joinRoomId, adminPassword);
-  const bindPlayer = { ...player, isOwner: ownerOk || !!player.isOwner };
+  // ▶ Admin kontrolü (opsiyonel)
+  let isOwner = !!player.isOwner;
+  if (typeof verifyAdmin === 'function') {
+    try { if (verifyAdmin(joinRoomId, adminPassword)) isOwner = true; } catch {}
+  }
 
-  const existing = room.players.get(bindPlayer.id) || {};
-  room.players.set(bindPlayer.id, { ...existing, ...bindPlayer, isAlive: existing.isAlive ?? true });
-  if (!room.ownerId && bindPlayer.isOwner) room.ownerId = bindPlayer.id;
+  // ▶ Oyuncuyu kaydet
+  const existing = room.players.get(player.id) || {};
+  const boundPlayer = { ...existing, ...player, isOwner, isAlive: existing.isAlive ?? true };
+  room.players.set(player.id, boundPlayer);
+  if (!room.ownerId && boundPlayer.isOwner) room.ownerId = player.id;
 
+  // ▶ Socket'i odaya ekle
+  ws.roomId = joinRoomId;
+  ws.playerId = player.id;
   room.sockets.add(ws);
 
-  ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
-  broadcast(room, 'PLAYER_LIST_UPDATED', {
-    players: Array.from(room.players.values()),
-    newPlayer: bindPlayer,
-  });
+  console.log('[JOIN] OK:', { room: joinRoomId, player: { id: player.id, name: player.name, isOwner } });
 
-  const snap = snapshotRoom(joinRoomId);
-  ws.send(JSON.stringify({ type: 'STATE_SNAPSHOT', payload: { roomId: joinRoomId, state: snap }, serverTime: now() }));
+  // ▶ İstemciye onay
+  ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
+
+  // ▶ Oyuncu listesini odaya yayınla
+  const playersArray = Array.from(room.players.values());
+  for (const sock of room.sockets) {
+    if (sock.readyState === 1 /* OPEN */) {
+      sock.send(JSON.stringify({
+        type: 'PLAYER_LIST_UPDATED',
+        payload: { players: playersArray, newPlayer: boundPlayer }
+      }));
+    }
+  }
+
+  // ▶ Snapshot'ı sadece bu socket'e ver (veya istersen tüm odaya)
+  if (typeof snapshotRoom === 'function') {
+    const snap = snapshotRoom(joinRoomId);
+    ws.send(JSON.stringify({
+      type: 'STATE_SNAPSHOT',
+      payload: { roomId: joinRoomId, state: snap },
+      serverTime: Date.now()
+    }));
+  }
   break;
 }
+
 
       case 'KICK_PLAYER': {
         if (!rid) return;
