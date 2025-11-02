@@ -164,6 +164,10 @@ try {
 
 
   this.sendEvent("REQUEST_SNAPSHOT", {});
+      while (this.outbox.length > 0) {
+  const msg = this.outbox.shift()!;
+  this.sendRaw(msg);
+}
 };
 
     this.socket.onmessage = (event: MessageEvent) => {
