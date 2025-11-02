@@ -1565,96 +1565,85 @@ wss.on('connection', (ws) => {
 
     switch (type) {
       case 'JOIN_ROOM': {
-  const { roomId, player, adminPassword, gameId } = payload || {};
-  if (!roomId || !player || !player.id) {
-    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN payload invalid' } }));
+  const { roomId: joinRoomId, player, adminPassword, gameId } = payload || {};
+  if (!joinRoomId || !player || !player.id) {
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'JOIN_ROOM payload invalid' } }));
     return;
   }
 
-  // Oda listesi henüz boşsa bir kere zorla yükle (timing güvenliği)
+  // rooms.json’dan izin/kapanıklık kontrolü (odalar dışa açıldıysa bırakılabilir)
+  // loadRooms() -> isValidRoom(), isRoomEnabled(), isGameAllowed() varsa kullan
   if (!ROOM_REGISTRY.rooms || ROOM_REGISTRY.rooms.length === 0) {
     await loadRooms();
   }
-
-  // rooms.json kontrolleri
-  if (!isValidRoom(roomId) || !isRoomEnabled(roomId)) {
-    console.warn('[JOIN] invalid/disabled room:', roomId);
+  if (!isValidRoom(joinRoomId) || !isRoomEnabled(joinRoomId)) {
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Geçersiz veya kapalı oda' } }));
     return;
   }
-  // oyun yetkisi – bu oyunda "210899"
-  if ((gameId ?? '210899') && !isGameAllowed(roomId, gameId ?? '210899')) {
-    console.warn('[JOIN] game not allowed:', roomId, 'gameId=', gameId);
+  if ((gameId ?? '210899') && !isGameAllowed(joinRoomId, gameId ?? '210899')) {
     ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Bu oyun bu oda için kapalı' } }));
     return;
   }
 
-  ws.roomId = roomId;
+  ws.roomId = joinRoomId;
   ws.playerId = player.id;
 
-  // 3) Admin kontrolü → isOwner ata
+  if (!rooms.has(joinRoomId)) {
+    rooms.set(joinRoomId, {
+      players: new Map(),
+      sockets: new Set(),
+      settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 },
+      state: {
+        phase: 'LOBBY',
+        currentTurn: 1,
+        nightActions: [],
+        votes: {},
+        // --- QR/effect state, vb. mevcut defaultların aynı kalabilir ---
+        cardShieldsNextNight: [],
+        reflectAttacksTonight: [],
+        reverseProtectEffectsTonight: false,
+        bypassShieldsActorNextNight: [],
+        roleLockRandomNextNight: [],
+        doubleVoteToday: [],
+        voteBanToday: [],
+        lynchImmunityToday: [],
+        lynchSwapIfSelfToday: [],
+        saviorCancelLynchToday: false,
+        scapegoatToday: [],
+        loversPairs: [],
+        resurrectionStone: null,
+        deathsThisTurn: [],
+        deathLog: [],
+        bombsByOwner: {},
+        playerNotes: {},
+        roleRevealReady: [],
+        discussionEndVoters: [],
+        game: null,
+        phaseEndsAt: 0,
+        selectedCardDrawers: [],
+        currentCardDrawerIndex: 0,
+        currentCardDrawer: null,
+        pendingCard: null,
+        secretMessageRequests: {},
+      },
+      timer: null,
+      ownerId: null,
+    });
+  }
+
+  const room = rooms.get(joinRoomId);
+
+  // Yönetici şifresi geldiyse sahiplik ata
   const ownerOk = verifyAdmin(joinRoomId, adminPassword);
   const bindPlayer = { ...player, isOwner: ownerOk || !!player.isOwner };
 
-        if (!rooms.has(joinRoomId)) {
-          rooms.set(joinRoomId, {
-            players: new Map(),
-            sockets: new Set(),
-            settings: { nightDuration: 60, dayDuration: 120, voteDuration: 45, cardDrawCount: 1 },
-            state: {
-              phase: 'LOBBY',
-              currentTurn: 1,
-              nightActions: [],
-              votes: {},
-
-              // QR effects state
-              cardShieldsNextNight: [],
-              reflectAttacksTonight: [],
-              reverseProtectEffectsTonight: false,
-              bypassShieldsActorNextNight: [],
-              roleLockRandomNextNight: [],
-              doubleVoteToday: [],
-              voteBanToday: [],
-              lynchImmunityToday: [],
-              lynchSwapIfSelfToday: [],
-              saviorCancelLynchToday: false,
-              scapegoatToday: [],
-              loversPairs: [],
-              resurrectionStone: null,
-
-              deathsThisTurn: [],
-              deathLog: [],
-              bombsByOwner: {},
-              playerNotes: {},
-              roleRevealReady: [],
-              discussionEndVoters: [],
-              game: null,
-              phaseEndsAt: 0,
-              // cards
-              selectedCardDrawers: [],
-              currentCardDrawerIndex: 0,
-              currentCardDrawer: null,
-              // pending card
-              pendingCard: null,
-              secretMessageRequests: {},  // (15) gizli mesaj modali için bekleyen istekler
-            },
-            timer: null,
-            ownerId: null,
-          });
-        }
-
-        const room = rooms.get(joinRoomId);
-
-  // ownerId sabitle
   const existing = room.players.get(bindPlayer.id) || {};
   room.players.set(bindPlayer.id, { ...existing, ...bindPlayer, isAlive: existing.isAlive ?? true });
-  if (!room.ownerId && bindPlayer.isOwner) {
-    room.ownerId = bindPlayer.id;
-  }
+  if (!room.ownerId && bindPlayer.isOwner) room.ownerId = bindPlayer.id;
+
   room.sockets.add(ws);
 
   ws.send(JSON.stringify({ type: 'ROOM_JOINED', payload: { roomId: joinRoomId } }));
-
   broadcast(room, 'PLAYER_LIST_UPDATED', {
     players: Array.from(room.players.values()),
     newPlayer: bindPlayer,
