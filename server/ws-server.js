@@ -1563,7 +1563,7 @@ wss.on('connection', (ws) => {
   ws.on('message', async (raw) => {
     let data;
     try {
-      data = JSON.parse(message);
+      data = JSON.parse(raw);
     } catch (e) {
       console.error('Invalid WS message', e);
       return;
